@@ -1,0 +1,31 @@
+[
+  { "category": "Bacteriology - Microscopy", "test_name": "Gram's stain", "template_test_name": "Gram Stain" },
+  { "category": "Bacteriology - Microscopy", "test_name": "ZN stain for AFB", "template_test_name": "ZN stain for acid fast bacilli" },
+  { "category": "Bacteriology - Microscopy", "test_name": "Modified ZN stain for M. leprae", "template_test_name": "Modified ZN stain for M.Leprae" },
+  { "category": "Bacteriology - Microscopy", "test_name": "Modified ZN stain for Nocardia", "template_test_name": "Modified ZN stain for Nocordia" },
+  { "category": "Bacteriology - Microscopy", "test_name": "Albert's stain for C. diphtheriae", "template_test_name": "Albert’s stain for Corynebacterium diphtheriae" },
+  { "category": "Bacteriology - Microscopy", "test_name": "Hanging drop preparation for Vibrio cholerae", "template_test_name": "Hanging drop preparation for Vibrio cholerae" },
+  { "category": "Bacteriology - Microscopy", "test_name": "Dark ground microscopy for spirochetes", "template_test_name": "Dark ground microscopy for spirochetes" },
+  { "category": "Bacteriology - Microscopy", "test_name": "Urine microscopy", "template_test_name": "Urine microscopy" },
+
+  { "category": "Bacteriology - Culture & Sensitivity", "test_name": "Aerobic culture & sensitivity", "template_test_name": "Aerobic culture" },
+  { "category": "Bacteriology - Culture & Sensitivity", "test_name": "Anaerobic culture (on request)", "template_test_name": null },
+
+  { "category": "Parasitology", "test_name": "Direct stool examination for ova & cyst", "template_test_name": "Direct stool microscopic examination" },
+  { "category": "Parasitology", "test_name": "Modified ZN stain for opportunistic intestinal protozoal parasites", "template_test_name": "Modified ZN stain for opportunistic intestinal protozoal parasites" },
+  { "category": "Parasitology", "test_name": "Saline wet mount", "template_test_name": "Saline wet mount" },
+  { "category": "Parasitology", "test_name": "Peripheral blood smear for Microfilaria", "template_test_name": "Pheripheral blood smear (PBS) for Microfilaria" },
+  { "category": "Parasitology", "test_name": "Peripheral blood smear for Malarial parasites", "template_test_name": "Peripheral Blood Smear (PBS) for Malarial Parasites" },
+
+  { "category": "Mycology", "test_name": "KOH mount", "template_test_name": "KOH wet mount" },
+  { "category": "Mycology", "test_name": "Gram's stain (fungal)", "template_test_name": "Gram Stain" },
+  { "category": "Mycology", "test_name": "India ink preparation", "template_test_name": "India ink preparation" },
+  { "category": "Mycology", "test_name": "Fungal culture", "template_test_name": "Fungal culture" },
+
+  { "category": "OT Sterility", "test_name": "Swab for Clostridium tetani", "template_test_name": "OT sterility check – swab for Clostridium tetani" },
+  { "category": "OT Sterility", "test_name": "Aerobic culture", "template_test_name": "OT sterility check – Aerobic culture" },
+
+  { "category": "Water Analysis", "test_name": "Water analysis (bacteriological)", "template_test_name": "Water Analysis" },
+
+  { "category": "Molecular Techniques", "test_name": "RT-PCR for COVID-19", "template_test_name": null }
+]

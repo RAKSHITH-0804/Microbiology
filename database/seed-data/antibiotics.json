@@ -1,0 +1,362 @@
+[
+  {
+    "antibiotic_name": "Amikacin",
+    "short_code": "AK"
+  },
+  {
+    "antibiotic_name": "Amoxycillin",
+    "short_code": "AMX"
+  },
+  {
+    "antibiotic_name": "Amoxycillin/Clavulanic Acid",
+    "short_code": "AMC"
+  },
+  {
+    "antibiotic_name": "Amoxyclav",
+    "short_code": "AMC"
+  },
+  {
+    "antibiotic_name": "Amphotericin B",
+    "short_code": "AMB"
+  },
+  {
+    "antibiotic_name": "Ampicillin",
+    "short_code": "AMP"
+  },
+  {
+    "antibiotic_name": "Azithromycin",
+    "short_code": "AZM"
+  },
+  {
+    "antibiotic_name": "Aztreonam",
+    "short_code": "AT"
+  },
+  {
+    "antibiotic_name": "Benzylpenicillin",
+    "short_code": "BP"
+  },
+  {
+    "antibiotic_name": "Carbenicillin",
+    "short_code": "CB"
+  },
+  {
+    "antibiotic_name": "Caspofungin",
+    "short_code": "CSPF"
+  },
+  {
+    "antibiotic_name": "Cefalexin",
+    "short_code": "CN"
+  },
+  {
+    "antibiotic_name": "Cefalotin",
+    "short_code": "CFT"
+  },
+  {
+    "antibiotic_name": "Cefazolin",
+    "short_code": "CZ"
+  },
+  {
+    "antibiotic_name": "Cefepime",
+    "short_code": "CPM"
+  },
+  {
+    "antibiotic_name": "Cefepime/Clavulanic Acid",
+    "short_code": "CFC"
+  },
+  {
+    "antibiotic_name": "Cefixime",
+    "short_code": "CFM"
+  },
+  {
+    "antibiotic_name": "Cefixime/Clavulanic Acid",
+    "short_code": "CMC"
+  },
+  {
+    "antibiotic_name": "Cefoperazone",
+    "short_code": "CPZ"
+  },
+  {
+    "antibiotic_name": "Cefoperazone/Sulbactam",
+    "short_code": "CFS"
+  },
+  {
+    "antibiotic_name": "Cefoperazone/Tazobactam",
+    "short_code": "CST"
+  },
+  {
+    "antibiotic_name": "Cefotaxime",
+    "short_code": "CTX"
+  },
+  {
+    "antibiotic_name": "Cefotaxime/Clavulanic Acid",
+    "short_code": "CEC"
+  },
+  {
+    "antibiotic_name": "Cefoxitin",
+    "short_code": "CX"
+  },
+  {
+    "antibiotic_name": "Cefoxitin screening",
+    "short_code": "CS"
+  },
+  {
+    "antibiotic_name": "Cefpodoxime",
+    "short_code": "CPD"
+  },
+  {
+    "antibiotic_name": "Ceftazidime",
+    "short_code": "CAZ"
+  },
+  {
+    "antibiotic_name": "Ceftazidime/Clavulanic Acid",
+    "short_code": "CAC"
+  },
+  {
+    "antibiotic_name": "Ceftriaxone",
+    "short_code": "CTR"
+  },
+  {
+    "antibiotic_name": "Ceftriaxone/Sulbactam",
+    "short_code": "CIS"
+  },
+  {
+    "antibiotic_name": "Ceftriaxone/Tazobactam",
+    "short_code": "CIT"
+  },
+  {
+    "antibiotic_name": "Cefuroxime",
+    "short_code": "CXM"
+  },
+  {
+    "antibiotic_name": "Cefuroxime Axetil",
+    "short_code": "CXMA"
+  },
+  {
+    "antibiotic_name": "Chloramphenicol",
+    "short_code": "C"
+  },
+  {
+    "antibiotic_name": "Ciprofloxacin",
+    "short_code": "CIP"
+  },
+  {
+    "antibiotic_name": "Clarithromycin",
+    "short_code": "CLR"
+  },
+  {
+    "antibiotic_name": "Clindamycin",
+    "short_code": "CD"
+  },
+  {
+    "antibiotic_name": "Cloxacillin",
+    "short_code": "COX"
+  },
+  {
+    "antibiotic_name": "Co-trimoxazole",
+    "short_code": "COT"
+  },
+  {
+    "antibiotic_name": "Colistin",
+    "short_code": "CL"
+  },
+  {
+    "antibiotic_name": "Daptomycin",
+    "short_code": "DPT"
+  },
+  {
+    "antibiotic_name": "Doripenem",
+    "short_code": "DOR"
+  },
+  {
+    "antibiotic_name": "Doxycycline Hydrochloride",
+    "short_code": "DO"
+  },
+  {
+    "antibiotic_name": "Ertapenem",
+    "short_code": "ERT"
+  },
+  {
+    "antibiotic_name": "Erythromycin",
+    "short_code": "E"
+  },
+  {
+    "antibiotic_name": "Fluconazole",
+    "short_code": "FLCN"
+  },
+  {
+    "antibiotic_name": "Flucytosine",
+    "short_code": "FLCT"
+  },
+  {
+    "antibiotic_name": "Fosfomycin",
+    "short_code": "FO"
+  },
+  {
+    "antibiotic_name": "Framycetin",
+    "short_code": "F"
+  },
+  {
+    "antibiotic_name": "Furazolidone",
+    "short_code": "FR"
+  },
+  {
+    "antibiotic_name": "Fusidic Acid",
+    "short_code": "FC"
+  },
+  {
+    "antibiotic_name": "Gatifloxacin",
+    "short_code": "GAT"
+  },
+  {
+    "antibiotic_name": "Gentamicin",
+    "short_code": "GEN"
+  },
+  {
+    "antibiotic_name": "High Level Gentamicin",
+    "short_code": "HLG"
+  },
+  {
+    "antibiotic_name": "Imipenem",
+    "short_code": "IPM"
+  },
+  {
+    "antibiotic_name": "Imipenem/Cilastatin",
+    "short_code": "IC"
+  },
+  {
+    "antibiotic_name": "Inducible Clindamycin Resistance",
+    "short_code": "ICR"
+  },
+  {
+    "antibiotic_name": "Levofloxacin",
+    "short_code": "LE"
+  },
+  {
+    "antibiotic_name": "Linezolid",
+    "short_code": "LZ"
+  },
+  {
+    "antibiotic_name": "Lomefloxacin",
+    "short_code": "LOM"
+  },
+  {
+    "antibiotic_name": "Meropenem",
+    "short_code": "MRP"
+  },
+  {
+    "antibiotic_name": "Micafungin",
+    "short_code": "MICF"
+  },
+  {
+    "antibiotic_name": "Minocycline",
+    "short_code": "MINC"
+  },
+  {
+    "antibiotic_name": "Moxifloxacin",
+    "short_code": "MO"
+  },
+  {
+    "antibiotic_name": "Mupirocin",
+    "short_code": "MU"
+  },
+  {
+    "antibiotic_name": "Nadifloxacin",
+    "short_code": "NAD"
+  },
+  {
+    "antibiotic_name": "Nalidixic Acid",
+    "short_code": "NA"
+  },
+  {
+    "antibiotic_name": "Netilmicin",
+    "short_code": "NET"
+  },
+  {
+    "antibiotic_name": "Nitrofurantoin",
+    "short_code": "NIT"
+  },
+  {
+    "antibiotic_name": "Norfloxacin",
+    "short_code": "NX"
+  },
+  {
+    "antibiotic_name": "Ofloxacin",
+    "short_code": "OF"
+  },
+  {
+    "antibiotic_name": "Oxacillin",
+    "short_code": "OX"
+  },
+  {
+    "antibiotic_name": "Pefloxacin",
+    "short_code": "PF"
+  },
+  {
+    "antibiotic_name": "Penicillin",
+    "short_code": "P"
+  },
+  {
+    "antibiotic_name": "Piperacillin",
+    "short_code": "PI"
+  },
+  {
+    "antibiotic_name": "Piperacillin/Tazobactam",
+    "short_code": "PIT"
+  },
+  {
+    "antibiotic_name": "Polymyxin-B",
+    "short_code": "PB"
+  },
+  {
+    "antibiotic_name": "Rifampicin",
+    "short_code": "RF"
+  },
+  {
+    "antibiotic_name": "Roxithromycin",
+    "short_code": "RO"
+  },
+  {
+    "antibiotic_name": "Silver Sulfadiazine",
+    "short_code": "SZ"
+  },
+  {
+    "antibiotic_name": "Sparfloxacin",
+    "short_code": "SPX"
+  },
+  {
+    "antibiotic_name": "Teicoplanin",
+    "short_code": "TEC"
+  },
+  {
+    "antibiotic_name": "Tetracycline",
+    "short_code": "TE"
+  },
+  {
+    "antibiotic_name": "Ticarcillin",
+    "short_code": "TI"
+  },
+  {
+    "antibiotic_name": "Ticarcillin/Clavulanic Acid",
+    "short_code": "TCC"
+  },
+  {
+    "antibiotic_name": "Tigecycline",
+    "short_code": "TGC"
+  },
+  {
+    "antibiotic_name": "Tobramycin",
+    "short_code": "TOB"
+  },
+  {
+    "antibiotic_name": "Trimethoprim/Sulfamethoxazole",
+    "short_code": "SXT"
+  },
+  {
+    "antibiotic_name": "Vancomycin",
+    "short_code": "VA"
+  },
+  {
+    "antibiotic_name": "Voriconazole",
+    "short_code": "VORN"
+  }
+]

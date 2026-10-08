@@ -1,0 +1,92 @@
+[
+  {
+    "name": "Dr.Usha.M.G",
+    "designation": "Professor & HOD",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Dr.Hanumanthappa.A.R",
+    "designation": "Professor",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Dr.Sunita.B.R",
+    "designation": "Professor",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Dr.Mangala.G.K.",
+    "designation": "Professor",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Dr.Rajendra Prasad.B.P.M.",
+    "designation": "Professor",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Dr.Basavaraj..K.N.",
+    "designation": "Professor",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Dr.Anjana Telkar",
+    "designation": "Professor",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Dr.Rajeswari.M.R.",
+    "designation": "Asso.Professor",
+    "staff_type": "TEACHING"
+  },
+  {
+    "name": "Mr.Lokesh.A.G.",
+    "designation": "Jr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mrs.Shilpa.H.S.",
+    "designation": "Jr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mr.Vinay Kumar.O.S.",
+    "designation": "Jr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mr.Raghavendra.G.R.",
+    "designation": "Jr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mr.Siddesh.G.O",
+    "designation": "Sr.Lab. Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mr.Parameshwarappa Sarathi",
+    "designation": "Jr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mr.Kotturesha.G",
+    "designation": "Jr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mr.Thippeswamy.A.N",
+    "designation": "Jr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mr.Nazeer Ahmed. C.A",
+    "designation": "Sr.Lab.Tech",
+    "staff_type": "NON_TEACHING"
+  },
+  {
+    "name": "Mrs.Kalpana.K.S",
+    "designation": "SDA",
+    "staff_type": "NON_TEACHING"
+  }
+]

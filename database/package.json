@@ -1,0 +1,15 @@
+{
+  "name": "@jjm/database",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "migrate": "node migrate.js",
+    "migrate:status": "node migrate.js --status",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1"
+  }
+}

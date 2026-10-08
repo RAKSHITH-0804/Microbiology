@@ -1,0 +1,146 @@
+[
+  {
+    "sample_name": "ASCITIC FLUID"
+  },
+  {
+    "sample_name": "BAL FLUIDS"
+  },
+  {
+    "sample_name": "BILE FLUID"
+  },
+  {
+    "sample_name": "BILE STONE"
+  },
+  {
+    "sample_name": "BLOOD"
+  },
+  {
+    "sample_name": "BODY FLUIDS"
+  },
+  {
+    "sample_name": "BRONCHIAL SECREATION"
+  },
+  {
+    "sample_name": "CATHETER TIP"
+  },
+  {
+    "sample_name": "CENTRAL LINE TIP"
+  },
+  {
+    "sample_name": "CERVICAL SWAB"
+  },
+  {
+    "sample_name": "CONJUNCTIVAL SWAB"
+  },
+  {
+    "sample_name": "CORNEAL SCRAPING"
+  },
+  {
+    "sample_name": "CSF"
+  },
+  {
+    "sample_name": "D.J.STENT"
+  },
+  {
+    "sample_name": "DRAIN TIP"
+  },
+  {
+    "sample_name": "DRAIN TUBE"
+  },
+  {
+    "sample_name": "EAR DISCHARGE"
+  },
+  {
+    "sample_name": "ET SECREATION"
+  },
+  {
+    "sample_name": "ET TUBE"
+  },
+  {
+    "sample_name": "EYE DISCHARGE"
+  },
+  {
+    "sample_name": "FLUID"
+  },
+  {
+    "sample_name": "GALL BLADDER"
+  },
+  {
+    "sample_name": "GALL BLADDER STONE"
+  },
+  {
+    "sample_name": "GASTRIC LAVAGE"
+  },
+  {
+    "sample_name": "KNEE ASPIRATION"
+  },
+  {
+    "sample_name": "NASAL SWAB"
+  },
+  {
+    "sample_name": "NECROTIC TISSUE"
+  },
+  {
+    "sample_name": "ORAL SECREATION"
+  },
+  {
+    "sample_name": "PERITONIAL FLUID"
+  },
+  {
+    "sample_name": "PLEURAL DRAIN ICD"
+  },
+  {
+    "sample_name": "PLEURAL FLUID"
+  },
+  {
+    "sample_name": "PUS"
+  },
+  {
+    "sample_name": "SEROUS DISCHARGE"
+  },
+  {
+    "sample_name": "SKIN SWAB"
+  },
+  {
+    "sample_name": "SLOUGH"
+  },
+  {
+    "sample_name": "SPUTUM"
+  },
+  {
+    "sample_name": "STOOL"
+  },
+  {
+    "sample_name": "SUCTION TIP"
+  },
+  {
+    "sample_name": "SUCTION TIP SECREATION"
+  },
+  {
+    "sample_name": "SWAB"
+  },
+  {
+    "sample_name": "SYNOVIAL FLUID"
+  },
+  {
+    "sample_name": "THROAT SWAB"
+  },
+  {
+    "sample_name": "TISSUE"
+  },
+  {
+    "sample_name": "URETHRAL DISCHARGE"
+  },
+  {
+    "sample_name": "URINE"
+  },
+  {
+    "sample_name": "VAGINAL SWAB"
+  },
+  {
+    "sample_name": "WOUND SITE"
+  },
+  {
+    "sample_name": "WOUND SWAB"
+  }
+]

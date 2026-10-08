@@ -1,0 +1,430 @@
+[
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Pus cells seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Few pus cells seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Occasional pus cells seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "No pus cells seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "No organisms seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Few epithelial cells are seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Epithelial cells seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram positive cocci in singles, pairs, short chains & clusters are seen."
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram negative bacilli seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Few gram negative bacilli seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram positive cocci in singles & pairs seen."
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram positive cocci in clusters seen."
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram positive oval budding yeast like cells seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Pseudohyphae seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram negative cocci in pairs are seen."
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram positive filamentous bacilli seen"
+  },
+  {
+    "test_name": "Gram Stain",
+    "finding_text": "Gram positive bacilli seen."
+  },
+  {
+    "test_name": "ZN stain for acid fast bacilli",
+    "finding_text": "Positive for acid fast bacilli"
+  },
+  {
+    "test_name": "ZN stain for acid fast bacilli",
+    "finding_text": "Negative for acid fast bacilli"
+  },
+  {
+    "test_name": "Modified ZN stain for M.Leprae",
+    "finding_text": "Positive for M.leprae"
+  },
+  {
+    "test_name": "Modified ZN stain for M.Leprae",
+    "finding_text": "Negative for M.leprae"
+  },
+  {
+    "test_name": "Modified ZN stain for Nocordia",
+    "finding_text": "Positive for filamentus acid fast bacilli"
+  },
+  {
+    "test_name": "Modified ZN stain for Nocordia",
+    "finding_text": "Negative for Nocardia"
+  },
+  {
+    "test_name": "Modified ZN stain for opportunistic intestinal protozoal parasites",
+    "finding_text": "Positive for oocysts of cryptosporidium species"
+  },
+  {
+    "test_name": "Modified ZN stain for opportunistic intestinal protozoal parasites",
+    "finding_text": "Negative for oocyst of cryptosporidium species"
+  },
+  {
+    "test_name": "Modified ZN stain for opportunistic intestinal protozoal parasites",
+    "finding_text": "Negative for opportunistic intestinal parasites"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Pus cells seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "No pus cells seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "RBc’s seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "No ova or cyst seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Fat globules seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Cyst of Entamoeba histolytica seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Trophozoite of Entamoeba histolytica seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Cyst of Giardia lamblia seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Trophozoite of Giardia lamblia seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Egg of Hook worm seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Egg of Round worm (Ascaris lumbricoides) seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Egg of Tape worm seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Egg of Trichuris trichiura"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Egg of Thread worm (Enterobius vermicularis) seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Egg of Hymenolepis nana (Dwarf tape worm) seen"
+  },
+  {
+    "test_name": "Direct stool microscopic examination",
+    "finding_text": "Larvae of strongyloides stercoralis seen"
+  },
+  {
+    "test_name": "Albert’s stain for Corynebacterium diphtheriae",
+    "finding_text": "Organisms morphologically resembling Corynebacterium diphtheriae seen"
+  },
+  {
+    "test_name": "Albert’s stain for Corynebacterium diphtheriae",
+    "finding_text": "Negative for Corynebacterium diphtheriae"
+  },
+  {
+    "test_name": "Hanging drop preparation for Vibrio cholerae",
+    "finding_text": "Positive for V.cholerae like motility"
+  },
+  {
+    "test_name": "Hanging drop preparation for Vibrio cholerae",
+    "finding_text": "Negative for V.cholerae like motility"
+  },
+  {
+    "test_name": "Urine microscopy",
+    "finding_text": "Pus cells seen"
+  },
+  {
+    "test_name": "Urine microscopy",
+    "finding_text": "No pus cells seen"
+  },
+  {
+    "test_name": "Urine microscopy",
+    "finding_text": "RBC’s seen"
+  },
+  {
+    "test_name": "Urine microscopy",
+    "finding_text": "No RBC’s seen"
+  },
+  {
+    "test_name": "Urine microscopy",
+    "finding_text": "Oval budding yeast like cells seen"
+  },
+  {
+    "test_name": "Aerobic culture",
+    "finding_text": "No growth"
+  },
+  {
+    "test_name": "Aerobic culture",
+    "finding_text": "Commensals isolated"
+  },
+  {
+    "test_name": "Aerobic culture",
+    "finding_text": "No significant bacteruria (NSB)"
+  },
+  {
+    "test_name": "Aerobic culture",
+    "finding_text": "Mixed growth"
+  },
+  {
+    "test_name": "Aerobic culture",
+    "finding_text": "Diphtheroids isolated"
+  },
+  {
+    "test_name": "OT sterility check – swab for Clostridium tetani",
+    "finding_text": "Negative for Clostridium tetani"
+  },
+  {
+    "test_name": "OT sterility check – swab for Clostridium tetani",
+    "finding_text": "Positive for Clostridium tetani like organisms"
+  },
+  {
+    "test_name": "OT sterility check – Aerobic culture",
+    "finding_text": "Sterilization satisfactory"
+  },
+  {
+    "test_name": "OT sterility check – Aerobic culture",
+    "finding_text": "Sterilization unsatisfactory"
+  },
+  {
+    "test_name": "India ink preparation",
+    "finding_text": "Positive for Cryptococcus neoformans"
+  },
+  {
+    "test_name": "India ink preparation",
+    "finding_text": "Negative for Cryptococcus neoformans"
+  },
+  {
+    "test_name": "Saline wet mount",
+    "finding_text": "Cysts of Acanthamoeba species seen"
+  },
+  {
+    "test_name": "Saline wet mount",
+    "finding_text": "Trophozoites of Acanthamoeba species seen"
+  },
+  {
+    "test_name": "Saline wet mount",
+    "finding_text": "Cysts & Trophozoites of Acanthamoeba species seen"
+  },
+  {
+    "test_name": "Saline wet mount",
+    "finding_text": "Negative for Acanthamoeba"
+  },
+  {
+    "test_name": "Saline wet mount",
+    "finding_text": "Trophozoites of Trichomonas vaginalis seen."
+  },
+  {
+    "test_name": "Saline wet mount",
+    "finding_text": "Negative for Trichomonas vaginalis."
+  },
+  {
+    "test_name": "Water Analysis",
+    "finding_text": "The given sample of water is fit for human consumption"
+  },
+  {
+    "test_name": "Water Analysis",
+    "finding_text": "The given sample of water is unfit for human consumption"
+  },
+  {
+    "test_name": "Dark ground microscopy for spirochetes",
+    "finding_text": "Motile organisms resembling leptospira are seen"
+  },
+  {
+    "test_name": "Dark ground microscopy for spirochetes",
+    "finding_text": "Negative for Leptospira"
+  },
+  {
+    "test_name": "Dark ground microscopy for spirochetes",
+    "finding_text": "Motile organisms resembling Treponema pallidum are seen"
+  },
+  {
+    "test_name": "Dark ground microscopy for spirochetes",
+    "finding_text": "Negative for Treponema pallidum"
+  },
+  {
+    "test_name": "Pheripheral blood smear (PBS) for Microfilaria",
+    "finding_text": "Positive for Microfilaria"
+  },
+  {
+    "test_name": "Pheripheral blood smear (PBS) for Microfilaria",
+    "finding_text": "Negative for Microfilaria"
+  },
+  {
+    "test_name": "KOH wet mount",
+    "finding_text": "Positive for fungal filaments"
+  },
+  {
+    "test_name": "KOH wet mount",
+    "finding_text": "Negative for fungal filaments"
+  },
+  {
+    "test_name": "KOH wet mount",
+    "finding_text": "Oval budding yeast like cells seen"
+  },
+  {
+    "test_name": "KOH wet mount",
+    "finding_text": "Oval budding yeast like cells with pseudohypahe seen."
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "No growth"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Aspergillus niger isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Aspegillus flavus isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Aspergillus fumigatus isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Pencillium species isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Candida species isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Candida albicans isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Rizopus species isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Mucor species isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Cryptococcus neoformans isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Trichophyton rubrum isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Trichophyton mentagrophytes isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Microsporum gypseum isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Microsprum canis isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Epidermophyton floccosum isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Trichophyton violaceum isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Trichophyton verrucosum isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Fusarium species isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Cephalosporium species isolated"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Alternaria species"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Curvularia species"
+  },
+  {
+    "test_name": "Fungal culture",
+    "finding_text": "Helminthosporium species"
+  },
+  {
+    "test_name": "Peripheral Blood Smear (PBS) for Malarial Parasites",
+    "finding_text": "Ring form of Plasmodium vivax seen."
+  },
+  {
+    "test_name": "Peripheral Blood Smear (PBS) for Malarial Parasites",
+    "finding_text": "Ring form of Plasmodium falciparum seen."
+  },
+  {
+    "test_name": "Peripheral Blood Smear (PBS) for Malarial Parasites",
+    "finding_text": "Gametocyte of Plasmodium vivax seen."
+  },
+  {
+    "test_name": "Peripheral Blood Smear (PBS) for Malarial Parasites",
+    "finding_text": "Gametocyte of Plasmodium falciparam seen."
+  },
+  {
+    "test_name": "Peripheral Blood Smear (PBS) for Malarial Parasites",
+    "finding_text": "Negative for malarial parasites ."
+  }
+]
