@@ -1,7 +1,10 @@
-import { useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LogOut, Menu, Microscope, Settings, X } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import { Lock, LogOut, Menu, Microscope, Settings, X } from 'lucide-react';
+import { ForcePasswordChangeDialog } from '@/components/auth/ForcePasswordChangeDialog';
 import { useAuth } from '@/context/AuthContext';
+import { useIdleTimeout } from '@/lib/useIdleTimeout';
 import { ROLE_LABELS } from '@/types/auth';
 import { NAV_ITEMS } from './navigation';
 
@@ -18,10 +21,23 @@ export default function AppLayout() {
 
   const items = NAV_ITEMS.filter((item) => !item.roles || (user && item.roles.includes(user.role)));
 
+  const mustChangePassword = !!user?.mustChangePassword;
+
   const handleLogout = async () => {
     await logout();
     navigate('/login', { replace: true });
   };
+
+  const handleIdleTimeout = useCallback(async () => {
+    try {
+      await logout();
+    } finally {
+      navigate('/login', { replace: true, state: { from: { pathname } } });
+      toast.info('You were signed out due to inactivity.', { description: 'Sign in again to continue where you left off.' });
+    }
+  }, [logout, navigate, pathname]);
+
+  useIdleTimeout(!!user, handleIdleTimeout);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden print:block print:h-auto print:w-auto print:overflow-visible">
@@ -35,13 +51,20 @@ export default function AppLayout() {
         }`}
       >
         <div className="flex h-16 items-center gap-3 border-b border-white/10 px-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600">
-            <Microscope className="h-5 w-5 text-white" />
-          </div>
-          <div className="leading-tight">
-            <p className="text-sm font-semibold text-white">JJMMC Microbiology</p>
-            <p className="text-xs text-slate-400">Laboratory ERP</p>
-          </div>
+          <Link
+            to="/dashboard"
+            onClick={() => setSidebarOpen(false)}
+            className="flex cursor-pointer items-center gap-3 rounded-lg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+            aria-label="Go to dashboard"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600">
+              <Microscope className="h-5 w-5 text-white" />
+            </div>
+            <div className="leading-tight">
+              <p className="text-sm font-semibold text-white">JJMMC Microbiology</p>
+              <p className="text-xs text-slate-400">Department of Microbiology</p>
+            </div>
+          </Link>
           <button className="ml-auto lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close menu">
             <X className="h-5 w-5" />
           </button>
@@ -97,8 +120,16 @@ export default function AppLayout() {
         </header>
 
         <main className="relative flex-1 scroll-pb-24 overflow-y-auto p-6 print:overflow-visible print:p-0">
-          <Outlet />
+          {mustChangePassword ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-slate-500">
+              <Lock className="h-8 w-8 text-slate-400" />
+              <p className="text-sm">Set a new password to unlock the portal.</p>
+            </div>
+          ) : (
+            <Outlet />
+          )}
         </main>
+        {mustChangePassword && <ForcePasswordChangeDialog onSignOut={handleLogout} />}
       </div>
     </div>
   );

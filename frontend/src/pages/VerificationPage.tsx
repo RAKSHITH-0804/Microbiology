@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ExternalLink, Inbox, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { ExternalLink, Inbox, Loader2, Lock, RefreshCw, Search, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { useAuth } from '@/context/AuthContext';
 import { fetchUnverifiedReports, verifyReport } from '@/features/admin/api';
 import { fetchRequisition } from '@/features/reports/api';
 import { getErrorMessage } from '@/lib/api';
 import { formatAge, formatDateTime, formatSex } from '@/lib/format';
 import type { UnverifiedReport } from '@/types/admin';
+import type { User } from '@/types/auth';
 import { SENSITIVITY_OPTIONS, type RequisitionDetail } from '@/types/report';
 
 const TYPE_LABEL = { general: 'General', antibiogram: 'Antibiogram' } as const;
@@ -202,7 +204,50 @@ function ReviewDialog({
   );
 }
 
+/** Doctors may verify only reports naming them as the reporting doctor; the HOD may verify any. */
+function canVerify(user: User | null, report: UnverifiedReport) {
+  if (!user) return false;
+  if (user.role === 'HOD') return true;
+  return user.role === 'DOCTOR' && user.staffId !== null && report.reported_by === user.staffId;
+}
+
+function QueueScopeBanner({ user, count }: { user: User | null; count: number }) {
+  if (!user) return null;
+  if (user.role === 'DOCTOR' && user.staffId === null) {
+    return (
+      <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <UserRound className="mt-0.5 h-4 w-4 shrink-0" />
+        <p>
+          Your account is not linked to a staff member, so no reports are assigned to you. Ask the HOD to link your account.
+        </p>
+      </div>
+    );
+  }
+  const isHod = user.role === 'HOD';
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      {isHod ? <Users className="mt-0.5 h-4 w-4 shrink-0" /> : <UserRound className="mt-0.5 h-4 w-4 shrink-0" />}
+      <div className="flex flex-1 flex-wrap items-center justify-between gap-2">
+        <p>
+          {isHod ? (
+            <>
+              Showing reports assigned to <span className="font-semibold">all doctors</span> (HOD override). You can verify any of them.
+            </>
+          ) : (
+            <>
+              Showing reports assigned to <span className="font-semibold">{user.name}</span>. Reports assigned to other doctors are not
+              shown here.
+            </>
+          )}
+        </p>
+        <Badge tone="blue">{count} pending</Badge>
+      </div>
+    </div>
+  );
+}
+
 export default function VerificationPage() {
+  const { user } = useAuth();
   const [rows, setRows] = useState<UnverifiedReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -245,9 +290,10 @@ export default function VerificationPage() {
     <div className="mx-auto max-w-7xl space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-primary">Step 3 - Verification</p>
           <h2 className="text-xl font-semibold text-foreground">Report Verification</h2>
-          <p className="text-sm text-muted-foreground">{rows.length} report(s) awaiting doctor verification</p>
+          <p className="text-sm text-muted-foreground">
+            {rows.length} report(s) awaiting {user?.role === 'DOCTOR' ? 'your' : 'doctor'} verification
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -264,6 +310,8 @@ export default function VerificationPage() {
           </Button>
         </div>
       </div>
+
+      <QueueScopeBanner user={user} count={rows.length} />
 
       <Card>
         <CardHeader className="pb-3">
@@ -319,9 +367,17 @@ export default function VerificationPage() {
                     <td className="px-4 py-3 text-slate-700">{r.reported_by_name || '-'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDateTime(r.reporting_datetime)}</td>
                     <td className="px-4 py-3 text-right">
-                      <Button size="sm" onClick={() => setReviewing(r)}>
-                        <ShieldCheck /> Review &amp; Verify
-                      </Button>
+                      {canVerify(user, r) ? (
+                        <Button size="sm" onClick={() => setReviewing(r)}>
+                          <ShieldCheck /> Review &amp; Verify
+                        </Button>
+                      ) : (
+                        <span title="You can only verify reports assigned to you">
+                          <Button size="sm" variant="outline" disabled>
+                            <Lock /> Not assigned to you
+                          </Button>
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -331,7 +387,11 @@ export default function VerificationPage() {
         </CardContent>
       </Card>
 
-      <ReviewDialog report={reviewing} onClose={() => setReviewing(null)} onVerified={handleVerified} />
+      <ReviewDialog
+        report={reviewing && canVerify(user, reviewing) ? reviewing : null}
+        onClose={() => setReviewing(null)}
+        onVerified={handleVerified}
+      />
     </div>
   );
 }

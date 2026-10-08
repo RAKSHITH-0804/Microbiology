@@ -48,7 +48,6 @@ export default function PendingQueuePage() {
     <div className="mx-auto max-w-7xl space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-primary">Step 2 - Reporting</p>
           <h2 className="text-xl font-semibold text-foreground">Pending Worklist</h2>
           <p className="text-sm text-muted-foreground">
             {rows.length} sample(s) awaiting verification - {receivedCount} without a report yet

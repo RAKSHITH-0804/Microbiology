@@ -1,5 +1,5 @@
 -- =====================================================================
--- J.J.M. Medical College - Department of Microbiology ERP
+-- J.J.M. Medical College - Department of Microbiology
 -- 001_initial_schema.sql
 -- =====================================================================
 

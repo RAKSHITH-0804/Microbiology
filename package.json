@@ -1,8 +1,8 @@
 {
-  "name": "jjm-microbiology-erp",
+  "name": "jjm-microbiology",
   "version": "0.1.0",
   "private": true,
-  "description": "J.J.M. Medical College - Department of Microbiology ERP",
+  "description": "J.J.M. Medical College - Department of Microbiology",
   "workspaces": [
     "backend",
     "frontend",

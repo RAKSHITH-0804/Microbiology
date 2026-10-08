@@ -62,9 +62,9 @@ async function seedStaffUsers(client) {
     const account = accountFor(member);
     const hash = await bcrypt.hash(account.password, BCRYPT_ROUNDS);
     const res = await client.query(
-      `INSERT INTO users (username, password_hash, role, staff_id) VALUES ($1, $2, $3, $4)
+      `INSERT INTO users (username, password_hash, role, staff_id, must_change_password) VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT ((LOWER(username))) DO NOTHING`,
-      [account.username, hash, account.role, member.id],
+      [account.username, hash, account.role, member.id, account.role !== 'HOD'],
     );
     (res.rowCount ? created : skipped).push({ ...account, staff: member.name });
   }

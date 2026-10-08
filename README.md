@@ -1,4 +1,4 @@
-# J.J.M. Medical College - Microbiology Department ERP
+# J.J.M. Medical College - Department of Microbiology
 
 A monorepo with three parts:
 

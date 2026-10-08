@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { toast } from 'sonner';
 import { KeyRound, Loader2, Printer, RotateCcw, ShieldCheck, UserRound } from 'lucide-react';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
@@ -16,6 +15,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
 import { fieldErrors } from '@/features/admin/api';
 import { changePassword, fetchSession } from '@/features/settings/api';
+import { EMPTY_PASSWORDS, passwordSchema, type PasswordValues } from '@/features/settings/passwordSchema';
 import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { ROLE_LABELS, type UserRole } from '@/types/auth';
@@ -126,20 +126,6 @@ function ProfileCard({ session, loading }: { session: SessionInfo | null; loadin
   );
 }
 
-const passwordSchema = z
-  .object({
-    currentPassword: z.string().min(1, 'Enter your current password'),
-    newPassword: z.string().min(6, 'New password must be at least 6 characters').max(72, 'New password must be at most 72 characters'),
-    confirmPassword: z.string().min(1, 'Re-enter the new password'),
-  })
-  .refine((v) => v.newPassword === v.confirmPassword, { path: ['confirmPassword'], message: 'Passwords do not match' })
-  .refine((v) => v.newPassword !== v.currentPassword, {
-    path: ['newPassword'],
-    message: 'New password must be different from the current one',
-  });
-type PasswordValues = z.infer<typeof passwordSchema>;
-const EMPTY_PASSWORDS: PasswordValues = { currentPassword: '', newPassword: '', confirmPassword: '' };
-
 function ChangePasswordCard({ onChanged }: { onChanged: () => void }) {
   const {
     register,
@@ -244,9 +230,7 @@ function SecurityTab() {
 
 function PrintTab() {
   const { printPrefs, setPrintPref, resetPrintPrefs, settings } = useSettings();
-  const isDefault =
-    printPrefs.auto_print_after_save === settings.print_defaults.auto_print_after_save &&
-    printPrefs.show_end_of_report === settings.print_defaults.show_end_of_report;
+  const isDefault = printPrefs.show_end_of_report === settings.print_defaults.show_end_of_report;
 
   return (
     <Card className="max-w-3xl">
@@ -254,17 +238,13 @@ function PrintTab() {
         <CardTitle className="flex items-center gap-2">
           <Printer className="h-4 w-4 text-primary" /> Report &amp; Print Preferences
         </CardTitle>
-        <CardDescription>Saved on this computer for your account and applied immediately.</CardDescription>
+        <CardDescription>
+          Saved on this computer for your account and applied immediately. Reports can be printed only after the assigned doctor
+          has verified them.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="divide-y">
-          <ToggleRow
-            id="auto-print"
-            title="Automatically open Print Preview after saving a report"
-            description="After Save on the General or Antibiogram report, the print dialog opens straight away."
-            checked={printPrefs.auto_print_after_save}
-            onChange={(v) => setPrintPref('auto_print_after_save', v)}
-          />
           <ToggleRow
             id="end-of-report"
             title={'Include "End of Report" footer line on printouts'}

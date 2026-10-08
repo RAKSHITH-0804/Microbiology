@@ -36,6 +36,11 @@ export async function setUserActive(id: number, isActive: boolean): Promise<AppU
   return res.data.data;
 }
 
+export async function deleteUser(id: number): Promise<{ message: string; staffDeleted: boolean }> {
+  const res = await api.delete<ApiResponse<{ id: number; username: string; staff_deleted: boolean }>>(`/users/${id}`);
+  return { message: res.data.message ?? 'User account deleted successfully', staffDeleted: res.data.data.staff_deleted };
+}
+
 export async function fetchMasterRows(entity: MasterEntityKey): Promise<MasterRow[]> {
   const res = await api.get<ApiResponse<MasterRow[]>>(`/master/${entity}`, { params: { include_inactive: 'true' } });
   return res.data.data;

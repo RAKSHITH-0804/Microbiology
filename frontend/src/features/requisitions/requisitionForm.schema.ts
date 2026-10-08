@@ -20,7 +20,7 @@ const agePart = (max: number, label: string) =>
 
 export const requisitionFormSchema = z
   .object({
-    lab_no: text(50).min(1, 'Lab No is required'),
+    lab_no: text(50).min(1, 'Lab No. is required'),
     receipt_no: text(50),
     sample_received_datetime: z.string().min(1, 'Receiving date & time is required'),
 

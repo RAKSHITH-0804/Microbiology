@@ -40,6 +40,8 @@ export interface AppUser {
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
+  /** Registered requisitions or prepared / reported / verified reports; such accounts can only be disabled. */
+  has_clinical_records: boolean;
 }
 
 export type StaffType = 'TEACHING' | 'NON_TEACHING';

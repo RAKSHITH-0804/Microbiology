@@ -23,6 +23,7 @@ const ACTION_TONE: Record<string, BadgeProps['tone']> = {
   ACTIVATE: 'emerald',
   RESTORE: 'emerald',
   DEACTIVATE: 'red',
+  DELETE: 'red',
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -53,6 +54,10 @@ function describe(e: AuditLogEntry): string {
     case 'ACTIVATE:users':
     case 'DEACTIVATE:users':
       return `${e.action === 'ACTIVATE' ? 'Activated' : 'Deactivated'} user account "${String(d.username ?? '')}"`;
+    case 'DELETE:users': {
+      const staff = typeof d.staff_name === 'string' ? ` (${d.staff_name})` : '';
+      return `Deleted user account "${String(d.username ?? '')}"${staff}${d.staff_deleted ? ' and its staff record' : ''}`;
+    }
     case 'CREATE:requisitions':
       return `Registered requisition${lab}`;
     case 'UPDATE:requisitions': {

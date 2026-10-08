@@ -12,6 +12,12 @@ export interface JwtPayload {
   iat?: number;
 }
 
+/** The authenticated user attached to `req.user`; role and staff link are re-read from the database per request. */
+export interface AuthUser extends JwtPayload {
+  staff_id: number | null;
+  must_change_password: boolean;
+}
+
 export const AUTH_COOKIE = 'token';
 const COOKIE_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 

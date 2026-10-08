@@ -163,7 +163,15 @@ const unverifiedFrom = (type: ReportType) => `
   FROM ${REPORT_TABLES[type]} x
   WHERE NOT x.is_verified`;
 
-export async function listUnverifiedReports(_req: Request, res: Response) {
+export async function listUnverifiedReports(req: Request, res: Response) {
+  const { role, staff_id: staffId } = req.user!;
+  // Doctors see only the reports naming them as the reporting doctor; the HOD sees every pending report.
+  const doctorOnly = role === 'DOCTOR';
+  if (doctorOnly && !staffId) {
+    res.json({ success: true, data: [] });
+    return;
+  }
+
   const { rows } = await query(
     `SELECT u.report_type, u.report_id, u.requisition_id, u.reporting_datetime,
             r.lab_no, r.receipt_no, r.sample_nature, r.hospital,
@@ -179,7 +187,9 @@ export async function listUnverifiedReports(_req: Request, res: Response) {
      JOIN patients p ON p.id = r.patient_id
      LEFT JOIN master_staff ps ON ps.id = u.prepared_by
      LEFT JOIN master_staff rs ON rs.id = u.reported_by
+     ${doctorOnly ? 'WHERE u.reported_by = $1' : ''}
      ORDER BY u.reporting_datetime ASC, u.report_id ASC`,
+    doctorOnly ? [staffId] : [],
   );
   res.json({ success: true, data: rows });
 }
@@ -245,16 +255,19 @@ export async function listReports(req: Request, res: Response) {
 
 export async function verifyReport(req: Request, res: Response) {
   const { type, id } = req.params as unknown as VerifyReportParams;
-  const userId = req.user!.sub;
+  const { sub: userId, role, staff_id: staffId } = req.user!;
   const table = REPORT_TABLES[type];
+  if (!staffId) throw new AppError(400, 'Your account is not linked to a staff member, so it cannot sign verifications');
 
   const result = await withTransaction(async (client) => {
-    const staff = await client.query<{ staff_id: number | null }>('SELECT staff_id FROM users WHERE id = $1', [userId]);
-    const staffId = staff.rows[0]?.staff_id;
-    if (!staffId) throw new AppError(400, 'Your account is not linked to a staff member, so it cannot sign verifications');
-
-    const { rows } = await client.query<{ requisition_id: number; is_verified: boolean; lab_no: string; status: string }>(
-      `SELECT x.requisition_id, x.is_verified, r.lab_no, r.status
+    const { rows } = await client.query<{
+      requisition_id: number;
+      reported_by: number | null;
+      is_verified: boolean;
+      lab_no: string;
+      status: string;
+    }>(
+      `SELECT x.requisition_id, x.reported_by, x.is_verified, r.lab_no, r.status
        FROM ${table} x JOIN requisitions r ON r.id = x.requisition_id
        WHERE x.id = $1
        FOR UPDATE OF x, r`,
@@ -262,6 +275,9 @@ export async function verifyReport(req: Request, res: Response) {
     );
     const report = rows[0];
     if (!report) throw new AppError(404, 'Report not found');
+    if (role !== 'HOD' && report.reported_by !== staffId) {
+      throw new AppError(403, 'You can only verify reports assigned to you');
+    }
     if (report.is_verified || report.status === 'VERIFIED') throw new AppError(409, 'This report has already been verified');
 
     const updated = await client.query<{ verified_at: Date }>(

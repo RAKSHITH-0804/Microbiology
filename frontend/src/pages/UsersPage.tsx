@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { Inbox, Loader2, RefreshCw, Search, UserPlus, Users } from 'lucide-react';
+import { AlertTriangle, Inbox, Loader2, RefreshCw, Search, Trash2, UserPlus, Users } from 'lucide-react';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FormField } from '@/components/FormField';
 import { useAuth } from '@/context/AuthContext';
-import { createUser, fetchUsers, fieldErrors, setUserActive } from '@/features/admin/api';
+import { createUser, deleteUser, fetchUsers, fieldErrors, setUserActive } from '@/features/admin/api';
 import { fetchStaff } from '@/features/reports/api';
 import { getErrorMessage } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/format';
@@ -303,6 +303,74 @@ function CreateUserDialog({
   );
 }
 
+function DeleteUserDialog({
+  target,
+  onClose,
+  onDeleted,
+}: {
+  target: AppUser | null;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!target) return;
+    setDeleting(true);
+    try {
+      const { message, staffDeleted } = await deleteUser(target.id);
+      toast.success(message, {
+        description: staffDeleted && target.staff_name ? `${target.staff_name} was also removed from the staff list.` : undefined,
+      });
+      onDeleted();
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not delete the user account'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!target} onOpenChange={(open) => !open && !deleting && onClose()}>
+      <DialogContent className="max-w-md">
+        {target && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-red-50 text-red-600">
+                  <AlertTriangle className="h-4 w-4" />
+                </span>
+                Delete User Account?
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete user &apos;<span className="font-mono font-semibold text-slate-900">{target.username}</span>&apos;
+                {target.staff_name && <> ({target.staff_name})</>}? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            {target.staff_name && (
+              <DialogBody>
+                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  The staff record <span className="font-semibold">{target.staff_name}</span> will also be removed from the staff list,
+                  as no other account or report uses it.
+                </p>
+              </DialogBody>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button className="bg-red-600 text-white hover:bg-red-700" onClick={handleDelete} disabled={deleting}>
+                {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                {deleting ? 'Deleting...' : 'Delete Account'}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function UsersPage() {
   const { user: me } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -312,6 +380,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
   const [toggling, setToggling] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<AppUser | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -399,7 +468,7 @@ export default function UsersPage() {
                   <th className="px-4 py-2.5">Role</th>
                   <th className="px-4 py-2.5">Last Login</th>
                   <th className="px-4 py-2.5">Created</th>
-                  <th className="px-4 py-2.5 text-right">Active</th>
+                  <th className="px-4 py-2.5 text-right">Active / Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -420,6 +489,11 @@ export default function UsersPage() {
                 )}
                 {visible.map((u) => {
                   const isMe = u.id === me?.id;
+                  const deleteBlockedReason = isMe
+                    ? 'You cannot delete your own account'
+                    : u.has_clinical_records
+                      ? 'Has clinical records - disable the account instead'
+                      : null;
                   return (
                     <tr key={u.id} className={u.is_active ? 'hover:bg-slate-50/70' : 'bg-slate-50/60 text-slate-500'}>
                       <td className="px-4 py-3">
@@ -448,6 +522,18 @@ export default function UsersPage() {
                             aria-label={`${u.is_active ? 'Deactivate' : 'Activate'} ${u.username}`}
                             title={isMe ? 'You cannot deactivate your own account' : undefined}
                           />
+                          <span title={deleteBlockedReason ?? `Delete ${u.username}`}>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              disabled={!!deleteBlockedReason}
+                              onClick={() => setDeleting(u)}
+                              aria-label={`Delete user ${u.username}`}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </span>
                         </div>
                       </td>
                     </tr>
@@ -465,6 +551,15 @@ export default function UsersPage() {
         staff={staff}
         users={users}
         onCreated={load}
+      />
+
+      <DeleteUserDialog
+        target={deleting}
+        onClose={() => setDeleting(null)}
+        onDeleted={() => {
+          setDeleting(null);
+          load();
+        }}
       />
     </div>
   );

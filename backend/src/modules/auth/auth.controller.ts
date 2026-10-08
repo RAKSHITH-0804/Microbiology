@@ -17,10 +17,11 @@ interface UserRow {
   staff_id: number | null;
   staff_name: string | null;
   designation: string | null;
+  must_change_password: boolean;
 }
 
 const USER_SELECT = `
-  SELECT u.id, u.username, u.password_hash, u.role, u.is_active, u.staff_id,
+  SELECT u.id, u.username, u.password_hash, u.role, u.is_active, u.staff_id, u.must_change_password,
          s.name AS staff_name, s.designation
   FROM users u
   LEFT JOIN master_staff s ON s.id = u.staff_id`;
@@ -33,6 +34,7 @@ function toPublicUser(row: UserRow) {
     staffId: row.staff_id,
     name: row.staff_name ?? row.username,
     designation: row.designation,
+    mustChangePassword: row.must_change_password,
   };
 }
 
@@ -115,9 +117,18 @@ export async function changePassword(req: Request, res: Response) {
   const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
   const changedAt = new Date();
   await withTransaction(async (client) => {
-    await client.query('UPDATE users SET password_hash = $2, password_changed_at = $3 WHERE id = $1', [userId, hash, changedAt]);
+    await client.query(
+      'UPDATE users SET password_hash = $2, password_changed_at = $3, must_change_password = FALSE WHERE id = $1',
+      [userId, hash, changedAt],
+    );
     await writeAuditLog(
-      { userId, action: 'PASSWORD_CHANGE', entityName: 'users', entityId: userId, details: { ip: req.ip } },
+      {
+        userId,
+        action: 'PASSWORD_CHANGE',
+        entityName: 'users',
+        entityId: userId,
+        details: { ip: req.ip, ...(req.user!.must_change_password && { first_login: true }) },
+      },
       client,
     );
   });

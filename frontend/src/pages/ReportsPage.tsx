@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Eye, FileText, Inbox, Loader2, Microscope, Printer, RefreshCw, Search, X } from 'lucide-react';
+import { Eye, FileText, Inbox, Loader2, Lock, Microscope, Printer, RefreshCw, Search, X } from 'lucide-react';
+import { PRINT_LOCKED_MESSAGE } from '@/components/reports/ReportPageFrame';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -179,7 +180,9 @@ export default function ReportsPage() {
                             Verified
                           </Badge>
                         ) : (
-                          <Badge tone="amber">Draft</Badge>
+                          <Badge tone="amber" title={PRINT_LOCKED_MESSAGE}>
+                            <Lock className="mr-1 h-3 w-3" /> Draft
+                          </Badge>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -189,11 +192,19 @@ export default function ReportsPage() {
                               <Eye /> View
                             </Link>
                           </Button>
-                          <Button asChild size="sm" variant="outline" title="Open the report and the A4 print dialog">
-                            <Link to={`${path}?print=1`}>
-                              <Printer /> View &amp; Print
-                            </Link>
-                          </Button>
+                          {r.is_verified ? (
+                            <Button asChild size="sm" variant="outline" title="Open the report and the A4 print dialog">
+                              <Link to={`${path}?print=1`}>
+                                <Printer /> View &amp; Print
+                              </Link>
+                            </Button>
+                          ) : (
+                            <span title={PRINT_LOCKED_MESSAGE}>
+                              <Button size="sm" variant="outline" disabled aria-label={`View & Print - ${PRINT_LOCKED_MESSAGE}`}>
+                                <Lock /> View &amp; Print
+                              </Button>
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>

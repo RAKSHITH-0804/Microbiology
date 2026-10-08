@@ -7,6 +7,8 @@ export interface User {
   staffId: number | null;
   name: string;
   designation: string | null;
+  /** Still on the temporary password issued by the HOD; every page stays blocked until it is replaced. */
+  mustChangePassword: boolean;
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {

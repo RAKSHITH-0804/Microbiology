@@ -2,11 +2,16 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import { api, ApiResponse } from '@/lib/api';
 import type { User } from '@/types/auth';
 
+/** Error code the API returns while the account is still on its temporary password. */
+const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
+
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
+  /** Call after the temporary password was replaced, to lift the first-login lock. */
+  markPasswordChanged: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -28,7 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (res) => res,
       (err) => {
         const url: string = err.config?.url ?? '';
-        if (err.response?.status === 401 && !url.includes('/auth/')) setUser(null);
+        const status = err.response?.status;
+        if (status === 401 && !url.includes('/auth/')) setUser(null);
+        if (status === 403 && err.response?.data?.errors?.code === PASSWORD_CHANGE_REQUIRED) {
+          setUser((current) => (current && !current.mustChangePassword ? { ...current, mustChangePassword: true } : current));
+        }
         return Promise.reject(err);
       },
     );
@@ -49,7 +58,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading, login, logout]);
+  const markPasswordChanged = useCallback(() => {
+    setUser((current) => (current ? { ...current, mustChangePassword: false } : current));
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, loading, login, logout, markPasswordChanged }),
+    [user, loading, login, logout, markPasswordChanged],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

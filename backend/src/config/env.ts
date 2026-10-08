@@ -7,7 +7,8 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(5000),
-  CLIENT_ORIGIN: z.string().default('http://localhost:5173'),
+  /** Comma-separated origins allowed to call the API with cookies; unset = *.indigocomputers.in + localhost. */
+  FRONTEND_URL: z.string().trim().optional(),
   DB_HOST: z.string().default('localhost'),
   DB_PORT: z.coerce.number().int().positive().default(5432),
   DB_NAME: z.string().min(1),

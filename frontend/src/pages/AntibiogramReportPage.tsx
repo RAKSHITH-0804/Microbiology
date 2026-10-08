@@ -13,11 +13,15 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FormField } from '@/components/FormField';
 import { SearchableSelect, type SearchableOption } from '@/components/SearchableSelect';
-import { ReportActionBar, ReportPageFrame } from '@/components/reports/ReportPageFrame';
+import {
+  PRINT_LOCKED_MESSAGE,
+  PrintLockedNotice,
+  ReportActionBar,
+  ReportPageFrame,
+} from '@/components/reports/ReportPageFrame';
 import { ReportPrintLayout } from '@/components/reports/ReportPrintLayout';
 import { RequisitionSummaryCard } from '@/components/reports/RequisitionSummaryCard';
 import { SignatoryFields } from '@/components/reports/SignatoryFields';
-import { useSettings } from '@/context/SettingsContext';
 import { fetchAntibiotics, fetchOrganisms, saveAntibiogramReport } from '@/features/reports/api';
 import { usePrintOnLoad } from '@/features/reports/usePrintOnLoad';
 import { useReportData } from '@/features/reports/useReportData';
@@ -62,7 +66,6 @@ export default function AntibiogramReportPage() {
   const { data, loading, error, reload, updateRequisition } = useReportData(requisitionId, loadMasters);
   const [search, setSearch] = useState('');
   const [selectedOnly, setSelectedOnly] = useState(false);
-  const { printPrefs } = useSettings();
 
   const {
     control,
@@ -72,7 +75,7 @@ export default function AntibiogramReportPage() {
     watch,
     getValues,
     setError,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
   const loadedRequisition = data?.requisition;
@@ -86,7 +89,8 @@ export default function AntibiogramReportPage() {
   const [organisms, antibiotics] = data?.extra ?? [[], []];
   const values = watch();
   const readOnly = requisition?.status === 'VERIFIED' || !!requisition?.antibiogram_report?.is_verified;
-  usePrintOnLoad(!!requisition, !!requisition?.antibiogram_report);
+  const printLocked = !requisition?.antibiogram_report?.is_verified;
+  usePrintOnLoad(!!requisition, !printLocked);
   const resultsError = typeof errors.results?.message === 'string' ? errors.results.message : undefined;
 
   const organismOptions = useMemo<SearchableOption[]>(
@@ -158,13 +162,12 @@ export default function AntibiogramReportPage() {
   };
 
   const invalid = () => toast.error('Please correct the highlighted fields');
-  const needsSave = isDirty || !requisition?.antibiogram_report;
-  const onPrint = handleSubmit(async (v) => {
-    if (needsSave && !readOnly && !(await save(v))) return;
-    setTimeout(() => window.print(), 0);
-  }, invalid);
+  const onPrint = () => {
+    if (printLocked) toast.error(PRINT_LOCKED_MESSAGE);
+    else window.print();
+  };
   const onSave = handleSubmit(async (v) => {
-    if ((await save(v)) && printPrefs.auto_print_after_save) setTimeout(() => window.print(), 0);
+    await save(v);
   }, invalid);
 
   const staffById = (id: string) => data?.staff.find((s) => String(s.id) === id);
@@ -365,12 +368,13 @@ export default function AntibiogramReportPage() {
               </CardContent>
             </Card>
 
-            <ReportActionBar saving={isSubmitting} readOnly={readOnly} needsSave={needsSave} onPrint={onPrint} />
+            <ReportActionBar saving={isSubmitting} readOnly={readOnly} printLocked={printLocked} onPrint={onPrint} />
           </form>
         )}
       </ReportPageFrame>
 
-      {requisition && (
+      {requisition && printLocked && <PrintLockedNotice />}
+      {requisition && !printLocked && (
         <ReportPrintLayout
           title="Culture & Antibiotic Sensitivity Report"
           requisition={requisition}

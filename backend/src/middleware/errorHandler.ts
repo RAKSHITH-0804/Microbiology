@@ -14,7 +14,7 @@ export class AppError extends Error {
 }
 
 export function notFoundHandler(req: Request, _res: Response, next: NextFunction) {
-  next(new AppError(404, `Route not found: ${req.method} ${req.originalUrl}`));
+  next(new AppError(404, isProduction ? 'Route not found' : `Route not found: ${req.method} ${req.originalUrl}`));
 }
 
 interface PgError {
@@ -22,7 +22,16 @@ interface PgError {
   detail?: string;
 }
 
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+/** Errors raised by body-parser carry an HTTP status and a `type` such as 'entity.parse.failed'. */
+interface HttpError {
+  status?: number;
+  type?: string;
+}
+
+/** Details (constraint names, column values, SQL text) are only echoed back outside production. */
+const devOnly = (details: unknown) => (isProduction || details === undefined ? {} : { errors: details });
+
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof ZodError) {
     const errors: Record<string, string[]> = {};
     for (const issue of err.issues) {
@@ -40,18 +49,26 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     });
   }
 
-  const pgErr = err as PgError;
-  if (pgErr?.code === '23505') {
-    return res.status(409).json({ success: false, message: 'Duplicate record', errors: pgErr.detail });
+  const httpErr = err as HttpError;
+  if (httpErr?.type === 'entity.parse.failed') {
+    return res.status(400).json({ success: false, message: 'Malformed request body' });
   }
-  if (pgErr?.code === '23503') {
-    return res.status(400).json({ success: false, message: 'Referenced record does not exist', errors: pgErr.detail });
+  if (httpErr?.type === 'entity.too.large') {
+    return res.status(413).json({ success: false, message: 'Request body is too large' });
   }
 
-  console.error(err);
+  const pgErr = err as PgError;
+  if (pgErr?.code === '23505') {
+    return res.status(409).json({ success: false, message: 'Duplicate record', ...devOnly(pgErr.detail) });
+  }
+  if (pgErr?.code === '23503') {
+    return res.status(400).json({ success: false, message: 'Referenced record does not exist', ...devOnly(pgErr.detail) });
+  }
+
+  console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`, err);
   return res.status(500).json({
     success: false,
     message: 'Internal server error',
-    ...(!isProduction && err instanceof Error && { errors: err.message }),
+    ...devOnly(err instanceof Error ? err.message : undefined),
   });
 }

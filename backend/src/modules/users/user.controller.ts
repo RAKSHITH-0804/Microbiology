@@ -8,10 +8,20 @@ import { CreateUserInput, UserStatusInput } from './user.schema';
 
 const BCRYPT_ROUNDS = 10;
 
+/** True when the account registered requisitions or its staff member prepared, reported or verified any report. */
+const HAS_CLINICAL_RECORDS = `(
+  EXISTS (SELECT 1 FROM requisitions r WHERE r.created_by = u.id)
+  OR (u.staff_id IS NOT NULL AND (
+    EXISTS (SELECT 1 FROM general_reports g WHERE u.staff_id IN (g.prepared_by, g.reported_by, g.verified_by))
+    OR EXISTS (SELECT 1 FROM antibiogram_reports a WHERE u.staff_id IN (a.prepared_by, a.reported_by, a.verified_by))
+  ))
+)`;
+
 const USER_SELECT = `
   SELECT u.id, u.username, u.role, u.is_active, u.staff_id, u.created_at, u.updated_at,
          s.name AS staff_name, s.designation, s.staff_type,
-         (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.user_id = u.id AND a.action = 'LOGIN') AS last_login_at
+         (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.user_id = u.id AND a.action = 'LOGIN') AS last_login_at,
+         ${HAS_CLINICAL_RECORDS} AS has_clinical_records
   FROM users u
   LEFT JOIN master_staff s ON s.id = u.staff_id`;
 
@@ -146,4 +156,63 @@ export async function setUserStatus(req: Request, res: Response) {
     message: `${user.username} ${is_active ? 'activated' : 'deactivated'}`,
     data: user,
   });
+}
+
+export async function deleteUser(req: Request, res: Response) {
+  const id = Number(req.params.id);
+  if (id === req.user!.sub) throw new AppError(400, 'You cannot delete your own account');
+
+  const result = await withTransaction(async (client) => {
+    const { rows } = await client.query<{
+      username: string;
+      role: string;
+      staff_id: number | null;
+      staff_name: string | null;
+      has_clinical_records: boolean;
+    }>(
+      `SELECT u.username, u.role, u.staff_id, s.name AS staff_name, ${HAS_CLINICAL_RECORDS} AS has_clinical_records
+       FROM users u LEFT JOIN master_staff s ON s.id = u.staff_id
+       WHERE u.id = $1
+       FOR UPDATE OF u`,
+      [id],
+    );
+    const target = rows[0];
+    if (!target) throw new AppError(404, 'User not found');
+    if (target.has_clinical_records) {
+      throw new AppError(400, 'Cannot delete user with existing clinical records. Disable the account instead.');
+    }
+
+    await client.query('DELETE FROM users WHERE id = $1', [id]);
+
+    // The staff record goes too unless another account still uses it; it has no report ties (checked above).
+    let staffDeleted = false;
+    if (target.staff_id !== null) {
+      const removed = await client.query(
+        'DELETE FROM master_staff s WHERE s.id = $1 AND NOT EXISTS (SELECT 1 FROM users u WHERE u.staff_id = s.id)',
+        [target.staff_id],
+      );
+      staffDeleted = (removed.rowCount ?? 0) > 0;
+    }
+
+    await writeAuditLog(
+      {
+        userId: req.user!.sub,
+        action: 'DELETE',
+        entityName: 'users',
+        entityId: id,
+        details: {
+          username: target.username,
+          role: target.role,
+          staff_id: target.staff_id,
+          staff_name: target.staff_name,
+          staff_deleted: staffDeleted,
+        },
+      },
+      client,
+    );
+
+    return { id, username: target.username, staff_deleted: staffDeleted };
+  });
+
+  res.json({ success: true, message: 'User account deleted successfully', data: result });
 }

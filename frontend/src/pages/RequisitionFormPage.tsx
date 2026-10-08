@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -39,7 +39,6 @@ import {
   toCreatePayload,
   withDoctorPrefix,
 } from '@/features/requisitions/requisitionForm.schema';
-import { useSettings } from '@/context/SettingsContext';
 import { getErrorMessage } from '@/lib/api';
 import { toDateTimeLocal } from '@/lib/datetime';
 import { HOSPITALS, type MasterSample, type TestCategory } from '@/types/requisition';
@@ -62,9 +61,9 @@ function allowDigitsOnly(e: KeyboardEvent<HTMLInputElement>) {
   if (e.key.length === 1 && !/\d/.test(e.key) && !e.ctrlKey && !e.metaKey) e.preventDefault();
 }
 
-function emptyForm(labNoPrefix = ''): RequisitionFormValues {
+function emptyForm(): RequisitionFormValues {
   return {
-    lab_no: labNoPrefix,
+    lab_no: '',
     receipt_no: '',
     sample_received_datetime: toDateTimeLocal(),
     patient_name: '',
@@ -106,9 +105,6 @@ export default function RequisitionFormPage() {
   const [original, setOriginal] = useState<RequisitionDetail | null>(null);
   const [editLoading, setEditLoading] = useState(isEdit);
   const [editError, setEditError] = useState<string | null>(null);
-  const { labNoPrefix } = useSettings();
-  const labNoPrefixRef = useRef(labNoPrefix);
-  labNoPrefixRef.current = labNoPrefix;
 
   const {
     register,
@@ -117,30 +113,14 @@ export default function RequisitionFormPage() {
     reset,
     watch,
     setError,
-    setValue,
-    getValues,
-    getFieldState,
     formState: { errors, isSubmitting },
   } = useForm<RequisitionFormValues>({
     resolver: zodResolver(requisitionFormSchema),
-    defaultValues: emptyForm(labNoPrefix),
+    defaultValues: emptyForm(),
     mode: 'onTouched',
   });
 
-  // Settings may arrive after the form mounted; only fill the prefix if the user has not typed a Lab No yet.
-  useEffect(() => {
-    if (!isEdit && !getFieldState('lab_no').isDirty && getValues('lab_no') !== labNoPrefix) {
-      setValue('lab_no', labNoPrefix);
-    }
-  }, [labNoPrefix, isEdit, getFieldState, getValues, setValue]);
-
-  /** Focus Lab No with the caret after the prefix, ready to type the running number. */
-  const focusLabNo = () =>
-    setTimeout(() => {
-      const input = document.getElementById('lab_no') as HTMLInputElement | null;
-      input?.focus();
-      input?.setSelectionRange(input.value.length, input.value.length);
-    }, 0);
+  const focusLabNo = () => setTimeout(() => document.getElementById('lab_no')?.focus(), 0);
 
   const phoneField = register('phone');
   const hospital = watch('hospital');
@@ -170,7 +150,7 @@ export default function RequisitionFormPage() {
     if (editId === null || !Number.isInteger(editId) || editId <= 0) {
       setEditLoading(false);
       if (editId !== null) setEditError('Invalid requisition id');
-      else reset(emptyForm(labNoPrefixRef.current));
+      else reset(emptyForm());
       return;
     }
     setEditLoading(true);
@@ -210,11 +190,6 @@ export default function RequisitionFormPage() {
   }, [selectedTests]);
 
   const onSubmit = async (values: RequisitionFormValues) => {
-    if (labNoPrefix && values.lab_no.trim() === labNoPrefix) {
-      setError('lab_no', { type: 'manual', message: `Enter the number after "${labNoPrefix}"` });
-      focusLabNo();
-      return;
-    }
     try {
       if (isEdit) {
         if (!original) return;
@@ -228,7 +203,7 @@ export default function RequisitionFormPage() {
       toast.success(`Requisition saved - Lab No ${saved.lab_no}`, {
         description: `${values.patient_name.trim()} - ${values.tests.length} investigation(s)`,
       });
-      reset(emptyForm(labNoPrefix));
+      reset(emptyForm());
       document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
       focusLabNo();
     } catch (err) {
@@ -246,7 +221,7 @@ export default function RequisitionFormPage() {
   };
 
   const handleReset = () => {
-    reset(original ? fromRequisition(original) : emptyForm(labNoPrefix));
+    reset(original ? fromRequisition(original) : emptyForm());
     focusLabNo();
   };
 
@@ -288,7 +263,6 @@ export default function RequisitionFormPage() {
               <ArrowLeft className="h-4 w-4" /> Pending Worklist
             </Link>
           )}
-          <p className="text-xs font-medium uppercase tracking-wider text-primary">Step 1 - Sample Reception</p>
           <h2 className="text-xl font-semibold text-foreground">
             {isEdit ? `Edit Requisition - ${original?.lab_no}` : 'Investigations Requisition Form'}
           </h2>
@@ -328,7 +302,7 @@ export default function RequisitionFormPage() {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
           <FormField label="Lab No." htmlFor="lab_no" required error={errors.lab_no?.message}>
-            <Input id="lab_no" autoFocus autoComplete="off" placeholder={`e.g. ${labNoPrefix || 'LAB-2026-'}0001`} aria-invalid={!!errors.lab_no} {...register('lab_no')} />
+            <Input id="lab_no" autoFocus autoComplete="off" placeholder="e.g. LAB-2026-001" aria-invalid={!!errors.lab_no} {...register('lab_no')} />
           </FormField>
           <FormField label="Receipt No." htmlFor="receipt_no" error={errors.receipt_no?.message}>
             <Input id="receipt_no" autoComplete="off" aria-invalid={!!errors.receipt_no} {...register('receipt_no')} />
