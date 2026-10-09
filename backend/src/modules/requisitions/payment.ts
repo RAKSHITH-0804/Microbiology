@@ -72,12 +72,8 @@ export interface Billing {
   payment_status: PaymentStatus;
 }
 
-/**
- * Billing to store from a requisition save. Doctors cannot set billing (null = ignore their
- * payment fields); everyone else must send valid amounts. Throws a ZodError (400) otherwise.
- */
-export function billingFor(role: string, body: Partial<Record<keyof UpdatePaymentInput, unknown>>): Billing | null {
-  if (role === 'DOCTOR') return null;
+/** Billing to store from a requisition save. Throws a ZodError (400) when the amounts are invalid. */
+export function billingFor(body: Partial<Record<keyof UpdatePaymentInput, unknown>>): Billing {
   const p = updatePaymentSchema.parse({
     total_amount: body.total_amount,
     paid_amount: body.paid_amount,
@@ -86,6 +82,3 @@ export function billingFor(role: string, body: Partial<Record<keyof UpdatePaymen
   });
   return { ...p, payment_status: derivePaymentStatus(p.total_amount, p.paid_amount, p.payment_mode) };
 }
-
-/** What a doctor-registered requisition starts with: unpaid, awaiting the billing desk. */
-export const UNBILLED: Billing = { total_amount: 0, paid_amount: 0, payment_mode: null, payment_status: 'UNPAID' };

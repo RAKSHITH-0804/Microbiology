@@ -82,7 +82,7 @@ export const createRequisitionSchema = z
         (tests) => new Set(tests.map((t) => `${t.test_category}|${t.test_name}`)).size === tests.length,
         'Duplicate investigations selected',
       ),
-    // Billing rules are role-dependent, so they are enforced by billingFor() in the controller.
+    // Cross-field billing rules (paid <= total, mode when paid) are enforced by billingFor() in the controller.
     ...paymentFields,
   })
   .superRefine((data, ctx) => {

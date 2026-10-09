@@ -5,7 +5,7 @@ import { SettingsProvider } from '@/context/SettingsContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Toaster } from '@/components/ui/sonner';
 import AppLayout from '@/layout/AppLayout';
-import { NAV_ITEMS } from '@/layout/navigation';
+import { NAV_ITEMS, REQUISITION_ENTRY_DENIED, REQUISITION_ENTRY_ROLES } from '@/layout/navigation';
 import LoginPage from '@/pages/LoginPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ComingSoonPage from '@/pages/ComingSoonPage';
@@ -47,14 +47,18 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
                 {NAV_ITEMS.filter((item) => item.to !== '/').map((item) => (
-                  <Route key={item.to} element={<ProtectedRoute roles={item.roles} />}>
+                  <Route key={item.to} element={<ProtectedRoute roles={item.roles} deniedMessage={item.deniedMessage} />}>
                     <Route
                       path={item.to.slice(1)}
                       element={PAGES[item.to] ?? <ComingSoonPage title={item.label} />}
                     />
                   </Route>
                 ))}
-                <Route path="requisition/edit/:id" element={<RequisitionFormPage />} />
+                <Route
+                  element={<ProtectedRoute roles={REQUISITION_ENTRY_ROLES} deniedMessage={REQUISITION_ENTRY_DENIED} />}
+                >
+                  <Route path="requisition/edit/:id" element={<RequisitionFormPage />} />
+                </Route>
                 <Route path="requisitions/pending" element={<Navigate to="/worklist" replace />} />
                 <Route path="reports/general/:requisitionId" element={<GeneralReportPage />} />
                 <Route path="reports/antibiogram/:requisitionId" element={<AntibiogramReportPage />} />

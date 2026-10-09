@@ -5,7 +5,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
 import { AuthUser } from '../../utils/jwt';
 import { assertRequisitionUnlocked } from '../../utils/reportLock';
-import { billingFor, derivePaymentStatus, RELEASED_PAYMENT_STATUSES, UNBILLED, UpdatePaymentInput } from './payment';
+import { billingFor, derivePaymentStatus, RELEASED_PAYMENT_STATUSES, UpdatePaymentInput } from './payment';
 import { CreateRequisitionInput, ListRequisitionsQuery } from './requisition.schema';
 
 type PatientInput = CreateRequisitionInput['patient'];
@@ -62,7 +62,7 @@ export async function createRequisition(req: Request, res: Response) {
   const input = req.body as CreateRequisitionInput;
   const userId = req.user!.sub;
   const hospital = input.hospital === 'Other' ? input.hospital_other : input.hospital;
-  const billing = billingFor(req.user!.role, input) ?? UNBILLED;
+  const billing = billingFor(input);
 
   try {
     const result = await withTransaction(async (client) => {
@@ -215,7 +215,7 @@ export async function updateRequisition(req: Request, res: Response) {
   const input = req.body as CreateRequisitionInput;
   const userId = req.user!.sub;
   const hospital = input.hospital === 'Other' ? input.hospital_other : input.hospital;
-  const billing = billingFor(req.user!.role, input);
+  const billing = billingFor(input);
 
   try {
     const result = await withTransaction(async (client) => {
@@ -248,11 +248,7 @@ export async function updateRequisition(req: Request, res: Response) {
         sample_collection_datetime: input.sample_collection_datetime,
         sample_received_datetime: input.sample_received_datetime,
         address: input.address,
-        // A doctor's save keeps whatever billing the desk recorded.
-        total_amount: billing ? billing.total_amount : before.total_amount,
-        paid_amount: billing ? billing.paid_amount : before.paid_amount,
-        payment_status: billing ? billing.payment_status : before.payment_status,
-        payment_mode: billing ? billing.payment_mode : before.payment_mode,
+        ...billing,
       };
 
       const { rows } = await client.query<{ id: number; lab_no: string; status: string; payment_status: string }>(
@@ -345,13 +341,26 @@ export const REQUISITION_SELECT = `
   FROM requisitions r
   JOIN patients p ON p.id = r.patient_id`;
 
-export async function listPendingRequisitions(_req: Request, res: Response) {
+/** Requisitions with a report whose reporting doctor is the staff id bound to `param` (never matches NULL). */
+export const assignedToDoctor = (param: string) =>
+  `(EXISTS (SELECT 1 FROM general_reports g WHERE g.requisition_id = r.id AND g.reported_by = ${param})
+    OR EXISTS (SELECT 1 FROM antibiogram_reports a WHERE a.requisition_id = r.id AND a.reported_by = ${param}))`;
+
+export async function listPendingRequisitions(req: Request, res: Response) {
+  const params: unknown[] = [RELEASED_PAYMENT_STATUSES];
+  let doctorFilter = '';
+  if (req.user!.role === 'DOCTOR') {
+    params.push(req.user!.staff_id);
+    doctorFilter = `AND ${assignedToDoctor(`$${params.length}`)}`;
+  }
+
   const { rows } = await query(
     `${REQUISITION_SELECT}
      WHERE r.status IN ('RECEIVED', 'REPORT_ENTERED')
        AND r.payment_status = ANY($1::text[])
+       ${doctorFilter}
      ORDER BY r.sample_received_datetime DESC, r.id DESC`,
-    [RELEASED_PAYMENT_STATUSES],
+    params,
   );
   res.json({ success: true, data: rows });
 }
@@ -430,6 +439,7 @@ export async function listRequisitions(req: Request, res: Response) {
     conditions.push(sql(`$${params.length}`));
   };
 
+  if (req.user!.role === 'DOCTOR') add(assignedToDoctor, req.user!.staff_id);
   if (q.search) {
     add(
       (p) => `(r.lab_no ILIKE ${p} OR p.name ILIKE ${p} OR r.receipt_no ILIKE ${p} OR p.phone ILIKE ${p})`,
@@ -507,7 +517,7 @@ export async function getRequisition(req: Request, res: Response) {
 
   const generalReport = general.rows[0] ?? null;
   const antibiogramReport = antibiogram.rows[0] ?? null;
-  await assertDoctorCanView(req.user!, requisition.consultant_doctor, [generalReport, antibiogramReport]);
+  assertDoctorCanView(req.user!, [generalReport, antibiogramReport]);
 
   res.json({
     success: true,
@@ -515,38 +525,10 @@ export async function getRequisition(req: Request, res: Response) {
   });
 }
 
-/** Name tokens without titles/initials, e.g. "Dr.Basavaraj..K.N." -> ["basavaraj"]. */
-const nameTokens = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/^\s*dr\b\.?/, '')
-    .split(/[^a-z]+/)
-    .filter((t) => t.length >= 3);
-
-/** True when the free-text consultant name refers to this staff member (initials and punctuation ignored). */
-function isSameDoctor(consultant: string, staffName: string) {
-  const consultantTokens = new Set(nameTokens(consultant));
-  const staffTokens = nameTokens(staffName);
-  return staffTokens.length > 0 && staffTokens.every((t) => consultantTokens.has(t));
-}
-
-/**
- * Doctors may open a requisition when they are its consultant, when one of its reports names
- * them as reporting doctor, or while no report exists yet (so they can author the first one).
- */
-async function assertDoctorCanView(
-  user: AuthUser,
-  consultant: string | null,
-  reports: ({ reported_by: number | null } | null)[],
-) {
+/** Doctors may only open a requisition when one of its reports names them as reporting doctor. */
+function assertDoctorCanView(user: AuthUser, reports: ({ reported_by: number | null } | null)[]) {
   if (user.role !== 'DOCTOR') return;
-  const existing = reports.filter((r): r is { reported_by: number | null } => r !== null);
-  if (existing.length === 0) return;
-  if (user.staff_id && existing.some((r) => r.reported_by === user.staff_id)) return;
-
-  if (user.staff_id && consultant) {
-    const { rows } = await query<{ name: string }>('SELECT name FROM master_staff WHERE id = $1', [user.staff_id]);
-    if (rows[0] && isSameDoctor(consultant, rows[0].name)) return;
+  if (!user.staff_id || !reports.some((r) => r?.reported_by === user.staff_id)) {
+    throw new AppError(403, 'Access denied: You can only view details for requisitions assigned to you');
   }
-  throw new AppError(403, 'You can only open requisitions for your own patients or reports assigned to you');
 }

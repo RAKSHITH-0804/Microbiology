@@ -7,16 +7,17 @@ import type { UserRole } from '@/types/auth';
 
 interface Props {
   roles?: UserRole[];
+  deniedMessage?: string;
 }
 
-function AccessDenied() {
+function AccessDenied({ message }: { message: string }) {
   useEffect(() => {
-    toast.error('You do not have access to that page', { id: 'access-denied' });
-  }, []);
+    toast.error(message, { id: 'access-denied' });
+  }, [message]);
   return <Navigate to="/dashboard" replace />;
 }
 
-export default function ProtectedRoute({ roles }: Props) {
+export default function ProtectedRoute({ roles, deniedMessage = 'You do not have access to that page' }: Props) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -29,7 +30,7 @@ export default function ProtectedRoute({ roles }: Props) {
   }
 
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
-  if (roles && !roles.includes(user.role)) return <AccessDenied />;
+  if (roles && !roles.includes(user.role)) return <AccessDenied message={deniedMessage} />;
 
   return <Outlet />;
 }

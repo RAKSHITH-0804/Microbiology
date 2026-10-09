@@ -45,10 +45,12 @@ async function lockEditableRequisition(
 }
 
 const AUTHOR_ONLY_MESSAGE = 'You can only author reports assigned to yourself';
+const NOT_ASSIGNED_MESSAGE = 'Access denied: Requisitions must be assigned to you by lab staff before entering results';
 
 /**
- * A doctor must name themselves as reporting doctor and cannot overwrite a report already
- * assigned to another doctor. Lab technicians and the HOD may prepare reports for any doctor.
+ * A doctor must name themselves as reporting doctor, cannot overwrite a report assigned to another
+ * doctor, and may only work on requisitions where lab staff already assigned them a report.
+ * Lab technicians and the HOD may prepare reports for any doctor.
  */
 async function assertDoctorAuthorship(
   client: PoolClient,
@@ -59,11 +61,15 @@ async function assertDoctorAuthorship(
 ) {
   if (user.role !== 'DOCTOR') return;
   if (!user.staff_id || reportedBy !== user.staff_id) throw new AppError(403, AUTHOR_ONLY_MESSAGE);
-  const { rows } = await client.query<{ reported_by: number | null }>(
-    `SELECT reported_by FROM ${reportTable} WHERE requisition_id = $1`,
+  const { rows } = await client.query<{ report_table: string; reported_by: number | null }>(
+    `SELECT 'general_reports' AS report_table, reported_by FROM general_reports WHERE requisition_id = $1
+     UNION ALL
+     SELECT 'antibiogram_reports', reported_by FROM antibiogram_reports WHERE requisition_id = $1`,
     [requisitionId],
   );
-  if (rows[0] && rows[0].reported_by !== user.staff_id) throw new AppError(403, AUTHOR_ONLY_MESSAGE);
+  const current = rows.find((r) => r.report_table === reportTable);
+  if (current && current.reported_by !== user.staff_id) throw new AppError(403, AUTHOR_ONLY_MESSAGE);
+  if (!rows.some((r) => r.reported_by === user.staff_id)) throw new AppError(403, NOT_ASSIGNED_MESSAGE);
 }
 
 /** Who saved the report, recorded in the audit trail alongside the acting user id. */

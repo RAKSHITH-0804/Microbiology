@@ -5,12 +5,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { StatusPill } from '@/components/reports/StatusPill';
+import { useAuth } from '@/context/AuthContext';
 import { fetchPendingRequisitions } from '@/features/requisitions/api';
+import { REQUISITION_ENTRY_ROLES } from '@/layout/navigation';
 import { getErrorMessage } from '@/lib/api';
 import { formatAge, formatDateTime, formatSex } from '@/lib/format';
 import type { PendingRequisition } from '@/types/requisition';
 
 export default function PendingQueuePage() {
+  const { user } = useAuth();
+  const canEditRequisitions = !!user && REQUISITION_ENTRY_ROLES.includes(user.role);
   const [rows, setRows] = useState<PendingRequisition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,11 +131,13 @@ export default function PendingQueuePage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <Button asChild size="sm" variant="outline" title="Edit requisition">
-                          <Link to={`/requisition/edit/${r.id}`}>
-                            <Pencil /> Edit
-                          </Link>
-                        </Button>
+                        {canEditRequisitions && (
+                          <Button asChild size="sm" variant="outline" title="Edit requisition">
+                            <Link to={`/requisition/edit/${r.id}`}>
+                              <Pencil /> Edit
+                            </Link>
+                          </Button>
+                        )}
                         <Button asChild size="sm" variant="outline">
                           <Link to={`/reports/general/${r.id}`}>
                             {r.general_report_id ? <CheckCircle2 className="text-emerald-600" /> : <FileText />}

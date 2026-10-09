@@ -18,6 +18,7 @@ import { StatusPill } from '@/components/reports/StatusPill';
 import { useAuth } from '@/context/AuthContext';
 import { fetchDashboardStats } from '@/features/requisitions/api';
 import { primaryReportLabel, primaryReportPath } from '@/features/requisitions/links';
+import { REQUISITION_ENTRY_ROLES } from '@/layout/navigation';
 import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -102,11 +103,13 @@ export default function DashboardPage() {
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={loading ? 'animate-spin' : undefined} /> Refresh
           </Button>
-          <Button asChild>
-            <Link to="/requisition/new">
-              <FilePlus2 /> New Requisition
-            </Link>
-          </Button>
+          {user && REQUISITION_ENTRY_ROLES.includes(user.role) && (
+            <Button asChild>
+              <Link to="/requisition/new">
+                <FilePlus2 /> New Requisition
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 

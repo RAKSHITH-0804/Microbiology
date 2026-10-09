@@ -34,7 +34,7 @@ import { getErrorMessage } from '@/lib/api';
 import { formatAge, formatDateTime, formatSex } from '@/lib/format';
 import { useFilterParams } from '@/lib/useFilterParams';
 import { useAuth } from '@/context/AuthContext';
-import { REVENUE_ROLES } from '@/layout/navigation';
+import { REQUISITION_ENTRY_ROLES, REVENUE_ROLES } from '@/layout/navigation';
 import { cn } from '@/lib/utils';
 import {
   PAYMENT_STATUSES,
@@ -140,6 +140,7 @@ export default function RequisitionsPage() {
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
   const { user } = useAuth();
   const canManagePayments = !!user && REVENUE_ROLES.includes(user.role);
+  const canEditRequisitions = !!user && REQUISITION_ENTRY_ROLES.includes(user.role);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -184,11 +185,13 @@ export default function RequisitionsPage() {
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={loading ? 'animate-spin' : undefined} /> Refresh
           </Button>
-          <Button asChild>
-            <Link to="/requisition/new">
-              <FilePlus2 /> New Requisition
-            </Link>
-          </Button>
+          {canEditRequisitions && (
+            <Button asChild>
+              <Link to="/requisition/new">
+                <FilePlus2 /> New Requisition
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -301,7 +304,11 @@ export default function RequisitionsPage() {
                   <tr>
                     <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                       <Inbox className="mx-auto mb-2 h-8 w-8 text-slate-300" />
-                      {hasFilters ? 'No requisitions match these filters.' : 'No requisitions registered yet.'}
+                      {hasFilters
+                        ? 'No requisitions match these filters.'
+                        : canEditRequisitions
+                          ? 'No requisitions registered yet.'
+                          : 'No requisitions with reports assigned to you yet.'}
                     </td>
                   </tr>
                 )}
@@ -344,19 +351,20 @@ export default function RequisitionsPage() {
                               <ReceiptIndianRupee /> Payment
                             </Button>
                           )}
-                          {locked ? (
-                            <span title="Verified requisitions are locked and cannot be edited">
-                              <Button size="sm" variant="outline" disabled>
-                                <Lock /> Locked
+                          {canEditRequisitions &&
+                            (locked ? (
+                              <span title="Verified requisitions are locked and cannot be edited">
+                                <Button size="sm" variant="outline" disabled>
+                                  <Lock /> Locked
+                                </Button>
+                              </span>
+                            ) : (
+                              <Button asChild size="sm" variant="outline" title="Edit requisition">
+                                <Link to={`/requisition/edit/${r.id}`}>
+                                  <Pencil /> Edit Requisition
+                                </Link>
                               </Button>
-                            </span>
-                          ) : (
-                            <Button asChild size="sm" variant="outline" title="Edit requisition">
-                              <Link to={`/requisition/edit/${r.id}`}>
-                                <Pencil /> Edit Requisition
-                              </Link>
-                            </Button>
-                          )}
+                            ))}
                           <ViewReportsMenu r={r} />
                         </div>
                       </td>

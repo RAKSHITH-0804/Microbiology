@@ -76,6 +76,12 @@ export function restrictTo(roles: readonly UserRole[], message = 'You do not hav
   };
 }
 
+/** Registering and editing requisitions is desk work; doctors only report on them. */
+export const requireRequisitionEntry = restrictTo(
+  ['HOD', 'LAB_TECH'],
+  'Access denied: Doctors cannot create or modify requisition records',
+);
+
 /** Billing data (collections, dues, patient ledgers) is for the HOD and desk staff, not reporting doctors. */
 export const REVENUE_ROLES: readonly UserRole[] = ['HOD', 'LAB_TECH'];
 export const requireRevenueAccess = restrictTo(
