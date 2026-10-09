@@ -1,5 +1,6 @@
 @tailwind base;
 @tailwind components;
+
 @tailwind utilities;
 
 @layer base {
@@ -49,6 +50,10 @@
 
   [data-sonner-toaster] {
     display: none !important;
+  }
+
+  .report-watermark {
+    opacity: 0.06;
   }
 
   /* Fill the printable A4 height (297mm minus the 12mm top and bottom margins) so signatures sit at the foot of the page. */

@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Loader2, Lock, Printer, Save } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, FileWarning, Loader2, Printer, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/context/AuthContext';
+import { canUse, REQUISITION_BROWSE_ROLES } from '@/layout/navigation';
 import { cn } from '@/lib/utils';
 
 interface ReportPageFrameProps {
@@ -16,12 +18,19 @@ interface ReportPageFrameProps {
 
 /** Screen-only page chrome for report entry: back link, title, and loading / error states. */
 export function ReportPageFrame({ step, title, labNo, loading, error, onRetry, children }: ReportPageFrameProps) {
+  const { user } = useAuth();
+  const back = canUse(user, REQUISITION_BROWSE_ROLES, 'pending_worklist')
+    ? { to: '/worklist', label: 'Pending Worklist' }
+    : canUse(user, undefined, 'reports')
+      ? { to: '/reports', label: 'Reports' }
+      : { to: '/dashboard', label: 'Dashboard' };
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 print:hidden">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link to="/worklist" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" /> Pending Worklist
+          <Link to={back.to} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> {back.label}
           </Link>
           <p className="text-xs font-medium uppercase tracking-wider text-primary">{step}</p>
           <h2 className="text-xl font-semibold text-foreground">
@@ -51,29 +60,31 @@ export function ReportPageFrame({ step, title, labNo, loading, error, onRetry, c
   );
 }
 
-export const PRINT_LOCKED_MESSAGE = 'Printing locked until verified by assigned doctor';
+export const DRAFT_PRINT_TITLE = 'DRAFT REPORT - NOT FOR MEDICO-LEGAL PURPOSES';
+export const DRAFT_PRINT_HINT = 'Not yet verified: prints as a watermarked draft without names or signatures';
+export const NOTHING_TO_PRINT_MESSAGE = 'Save the report before printing a draft';
 
-/** Amber lock badge shown wherever printing is unavailable because the report is not yet verified. */
-export function PrintLockedBadge({ className }: { className?: string }) {
+/** Amber badge marking an unverified report, whose printout is a signature-free draft. */
+export function DraftBadge({ className }: { className?: string }) {
   return (
     <span
-      title={PRINT_LOCKED_MESSAGE}
+      title={DRAFT_PRINT_HINT}
       className={cn(
         'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-300',
         className,
       )}
     >
-      <Lock className="h-3.5 w-3.5" /> {PRINT_LOCKED_MESSAGE}
+      <FileWarning className="h-3.5 w-3.5" /> {DRAFT_PRINT_HINT}
     </span>
   );
 }
 
-/** Rendered instead of the A4 layout for unverified reports, so the browser's own Print command shows no report either. */
-export function PrintLockedNotice() {
+/** Rendered instead of the A4 layout while nothing has been saved, so the browser's own Print command shows no report. */
+export function NothingToPrintNotice() {
   return (
     <div className="hidden p-12 text-center font-sans text-black print:block">
-      <p className="text-lg font-bold">{PRINT_LOCKED_MESSAGE}</p>
-      <p className="mt-2 text-sm">This report is a draft. It can be printed once the assigned doctor has verified it.</p>
+      <p className="text-lg font-bold">No report to print yet</p>
+      <p className="mt-2 text-sm">{NOTHING_TO_PRINT_MESSAGE}.</p>
     </div>
   );
 }
@@ -81,22 +92,22 @@ export function PrintLockedNotice() {
 interface ReportActionBarProps {
   saving: boolean;
   readOnly: boolean;
-  /** True until this report has been verified; printing is only allowed for verified reports. */
-  printLocked: boolean;
+  /** Why the form cannot be edited; shown when `readOnly`. */
+  readOnlyMessage: string | null;
+  /** Unverified: printing produces a draft without names or signatures. */
+  draft: boolean;
   onPrint: () => void;
 }
 
-export function ReportActionBar({ saving, readOnly, printLocked, onPrint }: ReportActionBarProps) {
+export function ReportActionBar({ saving, readOnly, readOnlyMessage, draft, onPrint }: ReportActionBarProps) {
   return (
     <div className="sticky -bottom-6 z-20 -mx-6 -mb-6 border-t bg-white/95 backdrop-blur">
       <div className="flex flex-wrap items-center justify-end gap-3 px-6 py-3">
-        {readOnly && <p className="mr-auto text-sm text-amber-700">This report is verified and can no longer be edited.</p>}
-        {printLocked && <PrintLockedBadge className="mr-auto" />}
-        <span title={printLocked ? PRINT_LOCKED_MESSAGE : undefined}>
-          <Button type="button" variant="outline" onClick={onPrint} disabled={saving || printLocked}>
-            {printLocked ? <Lock /> : <Printer />} Print Report
-          </Button>
-        </span>
+        {readOnly && readOnlyMessage && <p className="mr-auto text-sm text-amber-700">{readOnlyMessage}</p>}
+        {draft && <DraftBadge className={cn(!(readOnly && readOnlyMessage) && 'mr-auto')} />}
+        <Button type="button" variant="outline" onClick={onPrint} disabled={saving}>
+          <Printer /> {draft ? 'Print Draft Report' : 'Print Report'}
+        </Button>
         <Button type="submit" disabled={saving || readOnly}>
           {saving ? <Loader2 className="animate-spin" /> : <Save />}
           {saving ? 'Saving...' : 'Save Report'}

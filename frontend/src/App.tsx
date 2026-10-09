@@ -5,7 +5,7 @@ import { SettingsProvider } from '@/context/SettingsContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Toaster } from '@/components/ui/sonner';
 import AppLayout from '@/layout/AppLayout';
-import { NAV_ITEMS, REQUISITION_ENTRY_DENIED, REQUISITION_ENTRY_ROLES } from '@/layout/navigation';
+import { NAV_ITEMS, REQUISITION_EDIT_ROLES, REQUISITION_ENTRY_DENIED } from '@/layout/navigation';
 import LoginPage from '@/pages/LoginPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ComingSoonPage from '@/pages/ComingSoonPage';
@@ -21,17 +21,21 @@ import SettingsPage from '@/pages/SettingsPage';
 import RequisitionsPage from '@/pages/RequisitionsPage';
 import ReportsPage from '@/pages/ReportsPage';
 import PaymentsPage from '@/pages/PaymentsPage';
+import RolesPermissionsPage from '@/pages/RolesPermissionsPage';
+import StatusTimelinePage from '@/pages/StatusTimelinePage';
 
 const PAGES: Record<string, ReactElement> = {
   '/requisition/new': <RequisitionFormPage />,
   '/worklist': <PendingQueuePage />,
   '/requisitions': <RequisitionsPage />,
+  '/status': <StatusTimelinePage />,
   '/reports': <ReportsPage />,
   '/payments': <PaymentsPage />,
   '/verification': <VerificationPage />,
   '/master-data': <MasterDataPage />,
   '/users': <UsersPage />,
   '/audit-logs': <AuditLogsPage />,
+  '/admin/roles': <RolesPermissionsPage />,
 };
 
 export default function App() {
@@ -47,7 +51,16 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
                 {NAV_ITEMS.filter((item) => item.to !== '/').map((item) => (
-                  <Route key={item.to} element={<ProtectedRoute roles={item.roles} deniedMessage={item.deniedMessage} />}>
+                  <Route
+                    key={item.to}
+                    element={
+                      <ProtectedRoute
+                        roles={item.roles}
+                        modules={item.module ? [item.module] : undefined}
+                        deniedMessage={item.deniedMessage}
+                      />
+                    }
+                  >
                     <Route
                       path={item.to.slice(1)}
                       element={PAGES[item.to] ?? <ComingSoonPage title={item.label} />}
@@ -55,7 +68,13 @@ export default function App() {
                   </Route>
                 ))}
                 <Route
-                  element={<ProtectedRoute roles={REQUISITION_ENTRY_ROLES} deniedMessage={REQUISITION_ENTRY_DENIED} />}
+                  element={
+                    <ProtectedRoute
+                      roles={REQUISITION_EDIT_ROLES}
+                      modules={['requisitions', 'pending_worklist']}
+                      deniedMessage={REQUISITION_ENTRY_DENIED}
+                    />
+                  }
                 >
                   <Route path="requisition/edit/:id" element={<RequisitionFormPage />} />
                 </Route>

@@ -30,6 +30,20 @@ export const paymentHistoryQuery = z
   .refine(validRange, rangeIssue);
 export type PaymentHistoryQuery = z.infer<typeof paymentHistoryQuery>;
 
+export const EXPORT_FORMATS = ['CSV', 'EXCEL', 'PDF'] as const;
+
+export const logExportSchema = z
+  .object({
+    ...rangeFields,
+    exportFormat: z.enum(EXPORT_FORMATS),
+    search: z.string().trim().max(100).optional(),
+    rowCount: z.number().int().min(0).max(5000),
+    /** Matching transactions on the server; above rowCount when the export was capped. */
+    totalMatching: z.number().int().min(0),
+  })
+  .refine(validRange, rangeIssue);
+export type LogExportInput = z.infer<typeof logExportSchema>;
+
 export const patientLedgerQuery = z
   .object({
     phone_no: z.string().trim().regex(/^\d{10}$/, 'Phone number must be exactly 10 digits').optional(),

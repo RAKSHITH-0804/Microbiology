@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
@@ -18,16 +18,21 @@ import { StatusPill } from '@/components/reports/StatusPill';
 import { useAuth } from '@/context/AuthContext';
 import { fetchDashboardStats } from '@/features/requisitions/api';
 import { primaryReportLabel, primaryReportPath } from '@/features/requisitions/links';
-import { REQUISITION_ENTRY_ROLES } from '@/layout/navigation';
+import { canUse, REPORT_AUTHOR_ROLES, REQUISITION_BROWSE_ROLES, REQUISITION_ENTRY_ROLES } from '@/layout/navigation';
 import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { DashboardStats } from '@/types/requisition';
 
+/** Charts pull in recharts, so only the HOD and Super Admin (who receive analytics) download it. */
+const AnalyticsCharts = lazy(() => import('@/components/dashboard/AnalyticsCharts'));
+
 interface KpiCard {
-  key: keyof Omit<DashboardStats, 'recentRequisitions'>;
+  key: keyof Omit<DashboardStats, 'recentRequisitions' | 'analytics'>;
   label: string;
   hint: string;
+  /** Doctors' counts cover only reports assigned to them. */
+  doctorHint: string;
   icon: LucideIcon;
   tone: string;
   to: string;
@@ -38,6 +43,7 @@ const KPIS: KpiCard[] = [
     key: 'samplesToday',
     label: 'Samples Received Today',
     hint: 'Requisitions registered today',
+    doctorHint: 'New samples assigned to you today',
     icon: FlaskConical,
     tone: 'bg-sky-50 text-sky-600',
     to: '/requisitions',
@@ -46,6 +52,7 @@ const KPIS: KpiCard[] = [
     key: 'pendingReports',
     label: 'Pending Reports',
     hint: 'Paid & received, no report entered yet',
+    doctorHint: 'Assigned culture & antibiogram samples awaiting entry',
     icon: ClipboardList,
     tone: 'bg-amber-50 text-amber-600',
     to: '/requisitions?status=RECEIVED',
@@ -54,6 +61,7 @@ const KPIS: KpiCard[] = [
     key: 'awaitingVerification',
     label: 'Awaiting Verification',
     hint: 'Report entered, not yet verified',
+    doctorHint: 'Draft reports assigned to you awaiting verification',
     icon: ShieldCheck,
     tone: 'bg-violet-50 text-violet-600',
     to: '/requisitions?status=REPORT_ENTERED',
@@ -62,11 +70,22 @@ const KPIS: KpiCard[] = [
     key: 'verifiedThisWeek',
     label: 'Verified This Week',
     hint: 'Fully verified in the last 7 days',
+    doctorHint: 'Reports verified by you in the last 7 days',
     icon: FileCheck2,
     tone: 'bg-emerald-50 text-emerald-600',
     to: '/requisitions?status=VERIFIED',
   },
 ];
+
+/** KPI cards drill into the requisition directory, which not every role can open. */
+function KpiLink({ to, children }: { to: string | null; children: ReactNode }) {
+  if (!to) return <div className="rounded-xl">{children}</div>;
+  return (
+    <Link to={to} className="group rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      {children}
+    </Link>
+  );
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -91,6 +110,9 @@ export default function DashboardPage() {
   }, [load]);
 
   const recent = stats?.recentRequisitions ?? [];
+  const canBrowse = canUse(user, REQUISITION_BROWSE_ROLES, 'requisitions');
+  const canAuthor = canUse(user, REPORT_AUTHOR_ROLES, 'pending_worklist', 'verification');
+  const canRegister = canUse(user, REQUISITION_ENTRY_ROLES, 'new_requisition');
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
@@ -103,7 +125,7 @@ export default function DashboardPage() {
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={loading ? 'animate-spin' : undefined} /> Refresh
           </Button>
-          {user && REQUISITION_ENTRY_ROLES.includes(user.role) && (
+          {canRegister && (
             <Button asChild>
               <Link to="/requisition/new">
                 <FilePlus2 /> New Requisition
@@ -121,9 +143,9 @@ export default function DashboardPage() {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {KPIS.map(({ key, label, hint, icon: Icon, tone, to }) => (
-          <Link key={key} to={to} className="group rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <Card className="h-full transition group-hover:border-primary/40 group-hover:shadow-md">
+        {KPIS.map(({ key, label, hint, doctorHint, icon: Icon, tone, to }) => (
+          <KpiLink key={key} to={canBrowse ? to : null}>
+            <Card className={cn('h-full transition', canBrowse && 'group-hover:border-primary/40 group-hover:shadow-md')}>
               <CardContent className="flex items-center gap-4 p-5">
                 <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-lg', tone)}>
                   <Icon className="h-5 w-5" />
@@ -133,13 +155,27 @@ export default function DashboardPage() {
                     {stats ? stats[key] : loading ? <Loader2 className="h-5 w-5 animate-spin text-slate-300" /> : '-'}
                   </p>
                   <p className="text-sm font-medium text-slate-700">{label}</p>
-                  <p className="truncate text-xs text-muted-foreground">{hint}</p>
+                  <p className="line-clamp-2 text-xs text-muted-foreground">
+                    {user?.role === 'DOCTOR' ? doctorHint : hint}
+                  </p>
                 </div>
               </CardContent>
             </Card>
-          </Link>
+          </KpiLink>
         ))}
       </div>
+
+      {stats?.analytics && (
+        <Suspense
+          fallback={
+            <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading analytics...
+            </div>
+          }
+        >
+          <AnalyticsCharts analytics={stats.analytics} />
+        </Suspense>
+      )}
 
       <Card>
         <CardHeader className="flex-row items-start justify-between gap-3 space-y-0 pb-3">
@@ -147,11 +183,13 @@ export default function DashboardPage() {
             <CardTitle>Recent Requisitions</CardTitle>
             <CardDescription>The 10 most recently registered samples.</CardDescription>
           </div>
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/requisitions">
-              View all <ArrowRight />
-            </Link>
-          </Button>
+          {canBrowse && (
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/requisitions">
+                View all <ArrowRight />
+              </Link>
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -192,11 +230,21 @@ export default function DashboardPage() {
                       <StatusPill status={r.status} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Button asChild size="sm" variant={r.status === 'RECEIVED' ? 'default' : 'outline'}>
-                        <Link to={primaryReportPath(r)}>
-                          {primaryReportLabel(r)} <ArrowRight />
-                        </Link>
-                      </Button>
+                      {canAuthor ? (
+                        <Button asChild size="sm" variant={r.status === 'RECEIVED' ? 'default' : 'outline'}>
+                          <Link to={primaryReportPath(r)}>
+                            {primaryReportLabel(r)} <ArrowRight />
+                          </Link>
+                        </Button>
+                      ) : r.status === 'RECEIVED' ? (
+                        <span className="text-xs text-muted-foreground">Awaiting report</span>
+                      ) : (
+                        <Button asChild size="sm" variant="outline">
+                          <Link to={primaryReportPath(r)}>
+                            View Report <ArrowRight />
+                          </Link>
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}

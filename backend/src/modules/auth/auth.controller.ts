@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '../../config/db';
+import { DISABLED_MODULES_SQL } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
 import { AUTH_COOKIE, authCookieOptions, signToken, UserRole, verifyToken } from '../../utils/jwt';
@@ -18,11 +19,12 @@ interface UserRow {
   staff_name: string | null;
   designation: string | null;
   must_change_password: boolean;
+  disabled_modules: string[];
 }
 
 const USER_SELECT = `
   SELECT u.id, u.username, u.password_hash, u.role, u.is_active, u.staff_id, u.must_change_password,
-         s.name AS staff_name, s.designation
+         s.name AS staff_name, s.designation, ${DISABLED_MODULES_SQL('u.id')}
   FROM users u
   LEFT JOIN master_staff s ON s.id = u.staff_id`;
 
@@ -35,6 +37,7 @@ function toPublicUser(row: UserRow) {
     name: row.staff_name ?? row.username,
     designation: row.designation,
     mustChangePassword: row.must_change_password,
+    disabledModules: row.role === 'SUPER_ADMIN' ? [] : row.disabled_modules,
   };
 }
 

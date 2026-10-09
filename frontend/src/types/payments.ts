@@ -21,6 +21,8 @@ export interface PaymentSummary {
   filtered_collection: number;
   filtered_billed: number;
   total_outstanding: number;
+  hospital_credit_total: number;
+  hospital_credit_count: number;
   exempt_total: number;
   exempt_count: number;
   transactions: number;
@@ -41,6 +43,9 @@ export interface PaymentTransaction {
   balance_due: number;
   payment_mode: PaymentMode | null;
   payment_status: PaymentStatus;
+  exempt_referred_by: string | null;
+  /** A verified report locks the bill against further changes. */
+  is_verified: boolean;
 }
 
 export interface PaymentHistoryPage {

@@ -43,10 +43,20 @@ import {
   toCreatePayload,
   withDoctorPrefix,
 } from '@/features/requisitions/requisitionForm.schema';
-import { computePayment, EMPTY_PAYMENT, formatRupees, isReleasedForReporting } from '@/features/requisitions/payment';
+import {
+  computePayment,
+  EMPTY_PAYMENT,
+  EXEMPT_REFERRAL_LABEL,
+  EXEMPT_REFERRAL_PLACEHOLDER,
+  formatRupees,
+  isNoCounterPayment,
+  isReleasedForReporting,
+  paymentModeNote,
+} from '@/features/requisitions/payment';
 import { useAuth } from '@/context/AuthContext';
 import { getErrorMessage } from '@/lib/api';
 import { toDateTimeLocal } from '@/lib/datetime';
+import { formatDateTime } from '@/lib/format';
 import { HOSPITALS, PAYMENT_MODES, type MasterSample, type PaymentStatus, type TestCategory } from '@/types/requisition';
 import type { RequisitionDetail } from '@/types/report';
 
@@ -143,8 +153,20 @@ export default function RequisitionFormPage() {
     total_amount: watch('total_amount'),
     paid_amount: watch('paid_amount'),
     payment_mode: watch('payment_mode'),
+    exempt_referred_by: watch('exempt_referred_by'),
   });
   const balanceDue = Math.max(payment.total_amount - payment.paid_amount, 0);
+  const exempt = payment.payment_mode === 'EXEMPT';
+  const noCounterPayment = isNoCounterPayment(payment.payment_mode);
+
+  // The server stamps the receiving time (and keeps it on edits) for everyone but the Super Admin.
+  const canSetReceivedTime = user?.role === 'SUPER_ADMIN';
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (isEdit || canSetReceivedTime) return;
+    const id = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(id);
+  }, [isEdit, canSetReceivedTime]);
 
   const loadMasters = useCallback(async () => {
     setMastersLoading(true);
@@ -339,25 +361,64 @@ export default function RequisitionFormPage() {
           <FormField label="Lab No." htmlFor="lab_no" required error={errors.lab_no?.message}>
             <Input id="lab_no" autoFocus autoComplete="off" placeholder="e.g. LAB-2026-001" aria-invalid={!!errors.lab_no} {...register('lab_no')} />
           </FormField>
-          <FormField label="Receipt No." htmlFor="receipt_no" error={errors.receipt_no?.message}>
-            <Input id="receipt_no" autoComplete="off" aria-invalid={!!errors.receipt_no} {...register('receipt_no')} />
-          </FormField>
-          <FormField label="Date & Time of Receiving Sample" htmlFor="sample_received_datetime" required error={errors.sample_received_datetime?.message}>
-            <Controller
-              control={control}
-              name="sample_received_datetime"
-              render={({ field }) => (
-                <DateTimePicker
-                  id="sample_received_datetime"
-                  ref={field.ref}
-                  value={field.value}
-                  onChange={field.onChange}
-                  onBlur={field.onBlur}
-                  invalid={!!errors.sample_received_datetime}
-                  disableFuture
+          <FormField
+            label="Receipt No."
+            htmlFor="receipt_no"
+            error={errors.receipt_no?.message}
+            hint={isEdit ? 'Locked to the receipt issued at registration' : undefined}
+          >
+            {isEdit ? (
+              <div className="relative">
+                <Input
+                  id="receipt_no"
+                  readOnly
+                  tabIndex={-1}
+                  title="The receipt number cannot be changed after registration"
+                  className="cursor-not-allowed bg-slate-50 pr-9 text-slate-700"
+                  {...register('receipt_no')}
                 />
-              )}
-            />
+                <Lock className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              </div>
+            ) : (
+              <Input id="receipt_no" autoComplete="off" aria-invalid={!!errors.receipt_no} {...register('receipt_no')} />
+            )}
+          </FormField>
+          <FormField
+            label="Date & Time of Receiving Sample"
+            htmlFor="sample_received_datetime"
+            required
+            error={errors.sample_received_datetime?.message}
+            hint={canSetReceivedTime ? undefined : isEdit ? 'Locked to the original receiving time' : 'Recorded automatically when saved'}
+          >
+            {canSetReceivedTime ? (
+              <Controller
+                control={control}
+                name="sample_received_datetime"
+                render={({ field }) => (
+                  <DateTimePicker
+                    id="sample_received_datetime"
+                    ref={field.ref}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    invalid={!!errors.sample_received_datetime}
+                    disableFuture
+                  />
+                )}
+              />
+            ) : (
+              <div className="relative">
+                <Input
+                  id="sample_received_datetime"
+                  readOnly
+                  tabIndex={-1}
+                  value={formatDateTime(isEdit ? original?.sample_received_datetime : now.toISOString())}
+                  title="Only the Super Admin can change the receiving time"
+                  className="cursor-not-allowed bg-slate-50 pr-9 text-slate-700"
+                />
+                <Lock className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              </div>
+            )}
           </FormField>
         </CardContent>
       </Card>
@@ -426,7 +487,7 @@ export default function RequisitionFormPage() {
             </div>
           </FormField>
 
-          <FormField label="Phone No." htmlFor="phone" error={errors.phone?.message} hint="10-digit mobile number" className="md:col-span-4">
+          <FormField label="Phone No." htmlFor="phone" required error={errors.phone?.message} hint="10-digit mobile number" className="md:col-span-4">
             <Input
               id="phone"
               type="tel"
@@ -656,7 +717,7 @@ export default function RequisitionFormPage() {
             <FormField
               label="Total Amount (₹)"
               htmlFor="total_amount"
-              required={payment.payment_mode !== 'HOSPITAL_CREDIT'}
+              required={!exempt}
               error={errors.total_amount?.message}
             >
               <AmountInput id="total_amount" aria-invalid={!!errors.total_amount} {...register('total_amount')} />
@@ -665,7 +726,7 @@ export default function RequisitionFormPage() {
               label="Amount Paid (₹)"
               htmlFor="paid_amount"
               error={errors.paid_amount?.message}
-              hint={balanceDue > 0 && payment.payment_mode !== 'HOSPITAL_CREDIT' ? `Balance due ${formatRupees(balanceDue)}` : undefined}
+              hint={balanceDue > 0 && !noCounterPayment ? `Balance due ${formatRupees(balanceDue)}` : undefined}
             >
               <AmountInput id="paid_amount" aria-invalid={!!errors.paid_amount} {...register('paid_amount')} />
             </FormField>
@@ -677,15 +738,33 @@ export default function RequisitionFormPage() {
                 ))}
               </NativeSelect>
             </FormField>
-            <FormField label="Payment Status" hint="Calculated from the amounts">
+            <FormField label="Payment Status" hint={noCounterPayment ? 'Set by the payment mode' : 'Calculated from the amounts'}>
               <div className="flex h-9 items-center rounded-md border border-dashed bg-muted/40 px-3">
                 <PaymentStatusBadge status={payment.payment_status} />
               </div>
             </FormField>
           </div>
+          {exempt && (
+            <FormField
+              label={EXEMPT_REFERRAL_LABEL}
+              htmlFor="exempt_referred_by"
+              required
+              error={errors.exempt_referred_by?.message}
+              hint="Recorded on the bill and in the audit trail"
+            >
+              <Input
+                id="exempt_referred_by"
+                autoComplete="off"
+                maxLength={255}
+                placeholder={EXEMPT_REFERRAL_PLACEHOLDER}
+                aria-invalid={!!errors.exempt_referred_by}
+                {...register('exempt_referred_by')}
+              />
+            </FormField>
+          )}
           <p className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            Requisitions will only advance to the Pending Worklist for reporting once payment status is marked as PAID or EXEMPT.
+            {paymentModeNote(payment.payment_mode)}
           </p>
           {readOnly && (
             <p className="text-xs text-muted-foreground">

@@ -6,7 +6,11 @@ import {
   AlertTriangle,
   BadgeIndianRupee,
   CalendarRange,
+  ChevronDown,
   Download,
+  FileDown,
+  FileSpreadsheet,
+  FileText,
   HandCoins,
   History,
   Inbox,
@@ -29,10 +33,27 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
+import { PaymentActionButton } from '@/components/requisitions/PaymentActionButton';
 import { UpdatePaymentDialog } from '@/components/requisitions/UpdatePaymentDialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { TablePagination } from '@/components/TablePagination';
-import { fetchPatientLedger, fetchPaymentHistory, fetchPaymentSummary } from '@/features/payments/api';
-import { formatRupees, PAYMENT_STATUS_META, paymentModeLabel } from '@/features/requisitions/payment';
+import { useAuth } from '@/context/AuthContext';
+import {
+  fetchPatientLedger,
+  fetchPaymentHistory,
+  fetchPaymentSummary,
+  logRevenueExport,
+  type ExportLogEntry,
+} from '@/features/payments/api';
+import {
+  downloadCsv,
+  downloadPdf,
+  downloadXlsx,
+  modeName,
+  type ExportFormat,
+  type RevenueExport,
+} from '@/features/payments/export';
+import { formatRupees, isNoCounterPayment, PAYMENT_STATUS_META } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/format';
 import { useFilterParams } from '@/lib/useFilterParams';
@@ -64,40 +85,19 @@ function datePresets() {
   ];
 }
 
-const modeName = (mode: PaymentMode | 'NOT_RECORDED' | null) =>
-  mode === 'NOT_RECORDED' || mode === null ? 'Not recorded' : (paymentModeLabel(mode) ?? mode);
-
-function csvCell(v: string | number | null) {
-  const s = v === null ? '' : String(v);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadCsv(rows: PaymentTransaction[], filename: string) {
-  const header = ['Lab No', 'Date & Time', 'Patient Name', 'Phone No', 'Total Amount', 'Paid Amount', 'Balance Due', 'Payment Mode', 'Payment Status'];
-  const lines = rows.map((r) =>
-    [
-      r.lab_no,
-      format(new Date(r.created_at), 'dd-MM-yyyy HH:mm'),
-      r.patient_name,
-      r.phone,
-      r.total_amount.toFixed(2),
-      r.paid_amount.toFixed(2),
-      r.balance_due.toFixed(2),
-      modeName(r.payment_mode),
-      r.payment_status,
-    ]
-      .map(csvCell)
-      .join(','),
-  );
-  // The BOM makes Excel read the file as UTF-8 (patient names may contain non-ASCII text).
-  const blob = new Blob(['\uFEFF' + [header.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+const EXPORTERS: Record<
+  ExportFormat,
+  {
+    label: string;
+    icon: typeof FileText;
+    auditFormat: ExportLogEntry['exportFormat'];
+    run: (e: RevenueExport) => void | Promise<void>;
+  }
+> = {
+  csv: { label: 'Export CSV (.csv)', icon: FileText, auditFormat: 'CSV', run: downloadCsv },
+  xlsx: { label: 'Export Excel (.xlsx)', icon: FileSpreadsheet, auditFormat: 'EXCEL', run: downloadXlsx },
+  pdf: { label: 'Export PDF (.pdf)', icon: FileDown, auditFormat: 'PDF', run: downloadPdf },
+};
 
 const toTarget = (t: PaymentTransaction): PaymentTarget => ({
   id: t.id,
@@ -107,6 +107,8 @@ const toTarget = (t: PaymentTransaction): PaymentTarget => ({
   paid_amount: t.paid_amount,
   payment_mode: t.payment_mode,
   payment_status: t.payment_status,
+  exempt_referred_by: t.exempt_referred_by,
+  is_verified: t.is_verified,
 });
 
 function KpiCard({
@@ -148,11 +150,13 @@ function PatientHistory({
   query,
   onSearch,
   onPay,
+  canOverride,
   refreshKey,
 }: {
   query: string;
   onSearch: (q: string) => void;
   onPay: (t: PaymentTarget) => void;
+  canOverride: boolean;
   refreshKey: number;
 }) {
   const [input, setInput] = useState(query);
@@ -313,6 +317,8 @@ function PatientHistory({
                           ? 'bg-emerald-500'
                           : v.payment_status === 'EXEMPT'
                             ? 'bg-violet-500'
+                            : v.payment_status === 'HOSPITAL_CREDIT'
+                              ? 'bg-blue-500'
                             : v.payment_status === 'PARTIAL'
                               ? 'bg-amber-500'
                               : 'bg-red-500',
@@ -338,9 +344,13 @@ function PatientHistory({
                           {v.balance_due > 0 && <p className="font-medium text-amber-700">Due {formatRupees(v.balance_due)}</p>}
                         </div>
                         <PaymentStatusBadge status={v.payment_status} />
-                        <Button size="sm" variant="outline" onClick={() => onPay(toTarget(v))}>
-                          <ReceiptIndianRupee /> Update
-                        </Button>
+                        <PaymentActionButton
+                          label="Update"
+                          status={v.payment_status}
+                          locked={v.is_verified}
+                          canOverride={canOverride}
+                          onClick={() => onPay(toTarget(v))}
+                        />
                       </div>
                     </div>
                   </li>
@@ -377,8 +387,11 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
   const [ledgerRefresh, setLedgerRefresh] = useState(0);
+  const { user } = useAuth();
+  const canOverride = user?.role === 'HOD';
 
   const filters: PaymentFilters = useMemo(
     () => ({
@@ -424,7 +437,8 @@ export default function PaymentsPage() {
     if (key === 'startDate') setOpenPicker('end');
   };
 
-  const exportCsv = async () => {
+  const runExport = async (kind: ExportFormat) => {
+    setExportOpen(false);
     setExporting(true);
     try {
       const all = await fetchPaymentHistory({ ...filters, search: urlSearch || undefined, page: 1, limit: EXPORT_LIMIT });
@@ -432,7 +446,24 @@ export default function PaymentsPage() {
         toast.info('No transactions to export for these filters');
         return;
       }
-      downloadCsv(all.items, `jjmmc-payments_${startDate}_to_${endDate}.csv`);
+      await EXPORTERS[kind].run({
+        rows: all.items,
+        total: all.total,
+        startDate,
+        endDate,
+        filters: [
+          paymentMode && `Mode: ${modeName(paymentMode)}`,
+          paymentStatus && `Status: ${PAYMENT_STATUS_META[paymentStatus].label}`,
+          urlSearch && `Search: "${urlSearch}"`,
+        ].filter((f): f is string => !!f),
+      });
+      logRevenueExport({
+        ...filters,
+        exportFormat: EXPORTERS[kind].auditFormat,
+        search: urlSearch || undefined,
+        rowCount: all.items.length,
+        totalMatching: all.total,
+      }).catch(() => toast.warning('The export was downloaded but could not be recorded in the audit log'));
       if (all.total > all.items.length) {
         toast.warning(`Exported the latest ${all.items.length} of ${all.total} transactions - narrow the date range for the rest.`);
       } else toast.success(`Exported ${all.items.length} transaction(s)`);
@@ -501,9 +532,13 @@ export default function PaymentsPage() {
           loading={loading}
         />
         <KpiCard
-          label="Exempt / Hospital Credit"
-          value={summary?.exempt_total}
-          hint={summary ? `${summary.exempt_count} exempt requisition(s) in range` : 'Billed to hospital credit'}
+          label="Hospital Credit"
+          value={summary?.hospital_credit_total}
+          hint={
+            summary
+              ? `${summary.hospital_credit_count} on credit - ${summary.exempt_count} exempt (${formatRupees(summary.exempt_total)} waived)`
+              : 'Billed to the hospital'
+          }
           icon={Landmark}
           border="border-l-violet-500"
           tone="bg-violet-50 text-violet-600"
@@ -512,12 +547,15 @@ export default function PaymentsPage() {
       </div>
 
       {summary && (
-        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {summary.breakdown_by_mode.map((m) => (
             <div key={m.mode} className="rounded-lg border bg-white px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{modeName(m.mode)}</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {modeName(m.mode)}
+                {isNoCounterPayment(m.mode) && <span className="normal-case tracking-normal"> (billed)</span>}
+              </p>
               <p className="text-base font-semibold tabular-nums text-slate-900">
-                {formatRupees(m.mode === 'HOSPITAL_CREDIT' ? m.billed : m.collected)}
+                {formatRupees(isNoCounterPayment(m.mode) ? m.billed : m.collected)}
               </p>
               <p className="text-xs text-muted-foreground">
                 {m.count} requisition(s)
@@ -612,9 +650,7 @@ export default function PaymentsPage() {
                     >
                       <option value="">All Modes</option>
                       {PAYMENT_MODES.map((m) => (
-                        <option key={m.value} value={m.value}>
-                          {m.value === 'HOSPITAL_CREDIT' ? 'Hospital Credit' : m.label}
-                        </option>
+                        <option key={m.value} value={m.value}>{m.label}</option>
                       ))}
                     </NativeSelect>
                   </div>
@@ -628,7 +664,7 @@ export default function PaymentsPage() {
                     >
                       <option value="">All Statuses</option>
                       {PAYMENT_STATUSES.map((s) => (
-                        <option key={s} value={s}>{s}</option>
+                        <option key={s} value={s}>{PAYMENT_STATUS_META[s].label}</option>
                       ))}
                     </NativeSelect>
                   </div>
@@ -642,9 +678,28 @@ export default function PaymentsPage() {
                   >
                     <X /> Clear
                   </Button>
-                  <Button variant="outline" onClick={exportCsv} disabled={exporting || !history?.total}>
-                    {exporting ? <Loader2 className="animate-spin" /> : <Download />} Export CSV
-                  </Button>
+                  <Popover open={exportOpen} onOpenChange={setExportOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" disabled={exporting || !history?.total}>
+                        {exporting ? <Loader2 className="animate-spin" /> : <Download />} Export <ChevronDown />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-52 p-1">
+                      {(Object.keys(EXPORTERS) as ExportFormat[]).map((kind) => {
+                        const { label, icon: Icon } = EXPORTERS[kind];
+                        return (
+                          <Button
+                            key={kind}
+                            variant="ghost"
+                            className="w-full justify-start font-normal"
+                            onClick={() => runExport(kind)}
+                          >
+                            <Icon /> {label}
+                          </Button>
+                        );
+                      })}
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
 
@@ -702,13 +757,13 @@ export default function PaymentsPage() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
-                            <Button
-                              size="sm"
-                              variant={t.payment_status === 'PARTIAL' || t.payment_status === 'UNPAID' ? 'default' : 'outline'}
+                            <PaymentActionButton
+                              label="Update Payment"
+                              status={t.payment_status}
+                              locked={t.is_verified}
+                              canOverride={canOverride}
                               onClick={() => setPaymentTarget(toTarget(t))}
-                            >
-                              <ReceiptIndianRupee /> Update Payment
-                            </Button>
+                            />
                             <Button
                               size="sm"
                               variant="ghost"
@@ -748,6 +803,7 @@ export default function PaymentsPage() {
             query={patientQuery}
             onSearch={(q) => updateParams({ patient: q, tab: 'patients' })}
             onPay={setPaymentTarget}
+            canOverride={canOverride}
             refreshKey={ledgerRefresh}
           />
         </TabsContent>

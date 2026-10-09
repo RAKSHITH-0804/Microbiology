@@ -32,7 +32,11 @@ export const patientSchema = z
     age_months: agePart(11, 'Months'),
     age_days: agePart(31, 'Days'),
     sex: z.enum(['M', 'F', 'Other']),
-    phone: optionalText(10).refine((v) => v === null || /^\d{10}$/.test(v), 'Phone number must be exactly 10 digits'),
+    phone: z
+      .string({ required_error: 'Phone number is required' })
+      .trim()
+      .min(1, 'Phone number is required')
+      .regex(/^\d{10}$/, 'Phone number must be exactly 10 digits'),
   })
   .refine((p) => p.age_years !== null || p.age_months !== null || p.age_days !== null, {
     path: ['age_years'],
@@ -119,3 +123,9 @@ export const listRequisitionsQuery = z
   });
 
 export type ListRequisitionsQuery = z.infer<typeof listRequisitionsQuery>;
+
+export const statusSearchQuery = z.object({
+  q: z.string().trim().max(100).optional(),
+});
+
+export type StatusSearchQuery = z.infer<typeof statusSearchQuery>;

@@ -4,6 +4,7 @@ import type { User } from '@/types/auth';
 
 /** Error code the API returns while the account is still on its temporary password. */
 const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
+const MODULE_DISABLED = 'MODULE_DISABLED';
 
 interface AuthContextValue {
   user: User | null;
@@ -12,6 +13,8 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   /** Call after the temporary password was replaced, to lift the first-login lock. */
   markPasswordChanged: () => void;
+  /** Re-reads the signed-in account, e.g. after its module permissions changed. */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -28,6 +31,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await api.get<ApiResponse<{ user: User }>>('/auth/me');
+      setUser(res.data.data.user);
+    } catch {
+      // A failed refresh keeps the current session; a 401 is handled by the interceptor below.
+    }
+  }, []);
+
+  // Pick up permission changes made by the Super Admin when the user comes back to the tab.
+  const signedIn = !!user;
+  useEffect(() => {
+    if (!signedIn) return;
+    const onVisible = () => document.visibilityState === 'visible' && refreshUser();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [signedIn, refreshUser]);
+
   useEffect(() => {
     const id = api.interceptors.response.use(
       (res) => res,
@@ -38,11 +59,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (status === 403 && err.response?.data?.errors?.code === PASSWORD_CHANGE_REQUIRED) {
           setUser((current) => (current && !current.mustChangePassword ? { ...current, mustChangePassword: true } : current));
         }
+        // A module was switched off since sign-in: reload the account so the sidebar drops it.
+        if (status === 403 && err.response?.data?.errors?.code === MODULE_DISABLED) refreshUser();
         return Promise.reject(err);
       },
     );
     return () => api.interceptors.response.eject(id);
-  }, []);
+  }, [refreshUser]);
 
   const login = useCallback(async (username: string, password: string) => {
     const res = await api.post<ApiResponse<{ user: User }>>('/auth/login', { username, password });
@@ -63,8 +86,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, markPasswordChanged }),
-    [user, loading, login, logout, markPasswordChanged],
+    () => ({ user, loading, login, logout, markPasswordChanged, refreshUser }),
+    [user, loading, login, logout, markPasswordChanged, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

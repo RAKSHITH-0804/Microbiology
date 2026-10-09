@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { KeyRound, Loader2, Printer, RotateCcw, ShieldCheck, UserRound } from 'lucide-react';
-import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { RoleBadge } from '@/components/RoleBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -18,10 +18,8 @@ import { changePassword, fetchSession } from '@/features/settings/api';
 import { EMPTY_PASSWORDS, passwordSchema, type PasswordValues } from '@/features/settings/passwordSchema';
 import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
-import { ROLE_LABELS, type UserRole } from '@/types/auth';
+import { ROLE_LABELS } from '@/types/auth';
 import type { SessionInfo } from '@/types/settings';
-
-const ROLE_TONE: Record<UserRole, BadgeProps['tone']> = { HOD: 'violet', DOCTOR: 'blue', LAB_TECH: 'emerald' };
 
 type TabKey = 'security' | 'print';
 
@@ -85,7 +83,7 @@ function ProfileCard({ session, loading }: { session: SessionInfo | null; loadin
         <CardTitle className="flex items-center gap-2">
           <UserRound className="h-4 w-4 text-primary" /> Profile
         </CardTitle>
-        <CardDescription>Your account details. Ask the HOD to correct your name or designation.</CardDescription>
+        <CardDescription>Your account details. Ask the administrator to correct your name or designation.</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="mb-5 flex items-center gap-4">
@@ -102,7 +100,7 @@ function ProfileCard({ session, loading }: { session: SessionInfo | null; loadin
             <span className="font-mono">{user.username}</span>
           </InfoItem>
           <InfoItem label="Role">
-            <Badge tone={ROLE_TONE[user.role]}>{user.role}</Badge>
+            <RoleBadge role={user.role} />
             <span className="ml-2 text-xs text-muted-foreground">{ROLE_LABELS[user.role]}</span>
           </InfoItem>
           <InfoItem label="Last Login">
@@ -239,8 +237,8 @@ function PrintTab() {
           <Printer className="h-4 w-4 text-primary" /> Report &amp; Print Preferences
         </CardTitle>
         <CardDescription>
-          Saved on this computer for your account and applied immediately. Reports can be printed only after the assigned doctor
-          has verified them.
+          Saved on this computer for your account and applied immediately. Unverified reports print as watermarked drafts without
+          names or signatures; the signed report prints once the assigned doctor has verified it.
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -40,7 +40,8 @@ const requisitionFormFields = z
     phone: z
       .string()
       .trim()
-      .refine((v) => v === '' || /^\d{10}$/.test(v), 'Phone number must be exactly 10 digits'),
+      .min(1, 'Phone number is required')
+      .regex(/^\d{10}$/, 'Phone number must be exactly 10 digits'),
     address: text(500),
     consultant_doctor: text(150),
     op_ip_no: text(50),
@@ -99,7 +100,7 @@ export function toCreatePayload(v: RequisitionFormValues): CreateRequisitionPayl
       age_months: numberOrNull(v.age.months),
       age_days: numberOrNull(v.age.days),
       sex: v.sex as CreateRequisitionPayload['patient']['sex'],
-      phone: orNull(v.phone),
+      phone: v.phone.trim(),
     },
     address: orNull(v.address),
     ...computePayment(v),

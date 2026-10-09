@@ -7,6 +7,8 @@ import type {
   PaymentPayload,
   PendingRequisition,
   RequisitionListPage,
+  RequisitionTimeline,
+  StatusSearchResult,
   RequisitionListParams,
   TestCategory,
   UpdatedPayment,
@@ -33,8 +35,9 @@ export async function updateRequisition(id: number, payload: CreateRequisitionPa
   return res.data.data;
 }
 
-export async function updatePayment(id: number, payload: PaymentPayload): Promise<UpdatedPayment> {
-  const res = await api.patch<ApiResponse<UpdatedPayment>>(`/requisitions/${id}/payment`, payload);
+/** `reason` is required by the server when the HOD overrides the bill of a verified requisition. */
+export async function updatePayment(id: number, payload: PaymentPayload, reason?: string): Promise<UpdatedPayment> {
+  const res = await api.patch<ApiResponse<UpdatedPayment>>(`/requisitions/${id}/payment`, { ...payload, reason });
   return res.data.data;
 }
 
@@ -45,6 +48,16 @@ export async function fetchPendingRequisitions(): Promise<PendingRequisition[]> 
 
 export async function fetchRequisitions(params: RequisitionListParams): Promise<RequisitionListPage> {
   const res = await api.get<ApiResponse<RequisitionListPage>>('/requisitions', { params });
+  return res.data.data;
+}
+
+export async function searchRequisitionStatus(q: string): Promise<StatusSearchResult[]> {
+  const res = await api.get<ApiResponse<StatusSearchResult[]>>('/requisitions/status-search', { params: q ? { q } : {} });
+  return res.data.data;
+}
+
+export async function fetchRequisitionTimeline(id: number): Promise<RequisitionTimeline> {
+  const res = await api.get<ApiResponse<RequisitionTimeline>>(`/requisitions/${id}/timeline`);
   return res.data.data;
 }
 

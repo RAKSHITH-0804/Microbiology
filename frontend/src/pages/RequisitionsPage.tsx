@@ -11,7 +11,6 @@ import {
   Lock,
   Microscope,
   Pencil,
-  ReceiptIndianRupee,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -26,15 +25,17 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { StatusPill } from '@/components/reports/StatusPill';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
+import { PaymentActionButton } from '@/components/requisitions/PaymentActionButton';
+import { ReportStaff } from '@/components/requisitions/ReportStaff';
 import { UpdatePaymentDialog } from '@/components/requisitions/UpdatePaymentDialog';
 import { TablePagination } from '@/components/TablePagination';
 import { fetchRequisitions } from '@/features/requisitions/api';
-import { formatRupees, PAYMENT_STATUS_META, paymentModeLabel } from '@/features/requisitions/payment';
+import { formatRupees, isNoCounterPayment, PAYMENT_STATUS_META, paymentModeLabel } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
 import { formatAge, formatDateTime, formatSex } from '@/lib/format';
 import { useFilterParams } from '@/lib/useFilterParams';
 import { useAuth } from '@/context/AuthContext';
-import { REQUISITION_ENTRY_ROLES, REVENUE_ROLES } from '@/layout/navigation';
+import { canUse, REQUISITION_EDIT_ROLES, REQUISITION_ENTRY_ROLES, REVENUE_ROLES } from '@/layout/navigation';
 import { cn } from '@/lib/utils';
 import {
   PAYMENT_STATUSES,
@@ -139,8 +140,9 @@ export default function RequisitionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
   const { user } = useAuth();
-  const canManagePayments = !!user && REVENUE_ROLES.includes(user.role);
-  const canEditRequisitions = !!user && REQUISITION_ENTRY_ROLES.includes(user.role);
+  const canManagePayments = canUse(user, REVENUE_ROLES, 'billing');
+  const canEditRequisitions = canUse(user, REQUISITION_EDIT_ROLES, 'requisitions', 'pending_worklist');
+  const canRegister = canUse(user, REQUISITION_ENTRY_ROLES, 'new_requisition');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,7 +187,7 @@ export default function RequisitionsPage() {
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={loading ? 'animate-spin' : undefined} /> Refresh
           </Button>
-          {canEditRequisitions && (
+          {canRegister && (
             <Button asChild>
               <Link to="/requisition/new">
                 <FilePlus2 /> New Requisition
@@ -288,6 +290,7 @@ export default function RequisitionsPage() {
                   <th className="px-4 py-2.5">Sample Nature</th>
                   <th className="px-4 py-2.5">Received On</th>
                   <th className="px-4 py-2.5">Status</th>
+                  <th className="px-4 py-2.5">Prepared / Reported By</th>
                   <th className="px-4 py-2.5">Payment</th>
                   <th className="px-4 py-2.5 text-right">Actions</th>
                 </tr>
@@ -295,14 +298,14 @@ export default function RequisitionsPage() {
               <tbody className={cn('divide-y', loading && data && 'opacity-60')}>
                 {loading && !data && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
                       <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading requisitions...
                     </td>
                   </tr>
                 )}
                 {data && data.items.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
                       <Inbox className="mx-auto mb-2 h-8 w-8 text-slate-300" />
                       {hasFilters
                         ? 'No requisitions match these filters.'
@@ -330,26 +333,35 @@ export default function RequisitionsPage() {
                       <td className="px-4 py-3">
                         <StatusPill status={r.status} />
                       </td>
+                      <td className="min-w-[11rem] px-4 py-3">
+                        <ReportStaff preparedBy={r.prepared_by_name} reportedBy={r.reported_by_name} />
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <PaymentStatusBadge status={r.payment_status} />
-                        {r.payment_status !== 'EXEMPT' && r.total_amount > 0 && (
-                          <p className="mt-1 text-xs tabular-nums text-slate-500">
-                            {formatRupees(r.paid_amount)} / {formatRupees(r.total_amount)}
-                          </p>
+                        {r.payment_status === 'HOSPITAL_CREDIT' ? (
+                          <p className="mt-1 text-xs tabular-nums text-slate-500">{formatRupees(r.total_amount)} billed</p>
+                        ) : (
+                          r.payment_status !== 'EXEMPT' &&
+                          r.total_amount > 0 && (
+                            <p className="mt-1 text-xs tabular-nums text-slate-500">
+                              {formatRupees(r.paid_amount)} / {formatRupees(r.total_amount)}
+                            </p>
+                          )
                         )}
-                        {r.payment_mode && <p className="text-xs text-slate-400">{paymentModeLabel(r.payment_mode)}</p>}
+                        {r.payment_mode && !isNoCounterPayment(r.payment_mode) && (
+                          <p className="text-xs text-slate-400">{paymentModeLabel(r.payment_mode)}</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
                           {canManagePayments && (
-                            <Button
-                              size="sm"
-                              variant={r.payment_status === 'PARTIAL' || r.payment_status === 'UNPAID' ? 'default' : 'outline'}
-                              title="Record or correct the payment"
-                              onClick={() => setPaymentTarget({ ...r, patient_name: r.patient.name })}
-                            >
-                              <ReceiptIndianRupee /> Payment
-                            </Button>
+                            <PaymentActionButton
+                              label="Payment"
+                              status={r.payment_status}
+                              locked={locked}
+                              canOverride={user?.role === 'HOD'}
+                              onClick={() => setPaymentTarget({ ...r, patient_name: r.patient.name, is_verified: locked })}
+                            />
                           )}
                           {canEditRequisitions &&
                             (locked ? (

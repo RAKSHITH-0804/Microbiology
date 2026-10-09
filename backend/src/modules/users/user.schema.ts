@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-export const USER_ROLES = ['HOD', 'DOCTOR', 'LAB_TECH'] as const;
+/** Roles that can be assigned from User Management; Super Admin accounts are provisioned by migration only. */
+export const USER_ROLES = ['HOD', 'DOCTOR', 'LAB_TECH', 'CLERK'] as const;
 
 export const STAFF_TYPES = ['TEACHING', 'NON_TEACHING'] as const;
 

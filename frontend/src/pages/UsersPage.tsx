@@ -4,7 +4,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
 import { AlertTriangle, Inbox, Loader2, RefreshCw, Search, Trash2, UserPlus, Users } from 'lucide-react';
-import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { Badge } from '@/components/ui/badge';
+import { RoleBadge } from '@/components/RoleBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -22,8 +23,7 @@ import type { AppUser, StaffType } from '@/types/admin';
 import { ROLE_LABELS, type UserRole } from '@/types/auth';
 import type { MasterStaff } from '@/types/report';
 
-const ROLES: UserRole[] = ['HOD', 'DOCTOR', 'LAB_TECH'];
-const ROLE_TONE: Record<UserRole, BadgeProps['tone']> = { HOD: 'violet', DOCTOR: 'blue', LAB_TECH: 'emerald' };
+const ROLES: UserRole[] = ['HOD', 'DOCTOR', 'LAB_TECH', 'CLERK'];
 
 type StaffMode = 'existing' | 'new';
 
@@ -506,7 +506,7 @@ export default function UsersPage() {
                         {u.designation && <p className="text-xs text-slate-500">{u.designation}</p>}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge tone={ROLE_TONE[u.role]} title={ROLE_LABELS[u.role]}>{u.role}</Badge>
+                        <RoleBadge role={u.role} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                         {u.last_login_at ? formatDateTime(u.last_login_at) : 'Never'}

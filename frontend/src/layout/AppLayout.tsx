@@ -6,7 +6,7 @@ import { ForcePasswordChangeDialog } from '@/components/auth/ForcePasswordChange
 import { useAuth } from '@/context/AuthContext';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
 import { ROLE_LABELS } from '@/types/auth';
-import { NAV_ITEMS } from './navigation';
+import { canSeeNavItem, NAV_ITEMS } from './navigation';
 
 const navLinkClass = (active: boolean) =>
   `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
@@ -19,7 +19,7 @@ export default function AppLayout() {
   const { pathname } = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const items = NAV_ITEMS.filter((item) => !item.roles || (user && item.roles.includes(user.role)));
+  const items = NAV_ITEMS.filter((item) => canSeeNavItem(user, item));
 
   const mustChangePassword = !!user?.mustChangePassword;
 

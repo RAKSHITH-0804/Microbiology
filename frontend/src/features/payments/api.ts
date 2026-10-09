@@ -13,6 +13,17 @@ export async function fetchPaymentHistory(
   return res.data.data;
 }
 
+export interface ExportLogEntry extends PaymentFilters {
+  exportFormat: 'CSV' | 'EXCEL' | 'PDF';
+  search?: string;
+  rowCount: number;
+  totalMatching: number;
+}
+
+export async function logRevenueExport(entry: ExportLogEntry): Promise<void> {
+  await api.post('/payments/log-export', entry);
+}
+
 export async function fetchPatientLedger(params: { phone_no?: string; patient_name?: string }): Promise<PatientLedger> {
   const res = await api.get<ApiResponse<PatientLedger>>('/payments/patient-ledger', { params });
   return res.data.data;

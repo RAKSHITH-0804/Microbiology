@@ -9,7 +9,7 @@ export const SENSITIVITY_OPTIONS: { value: SensitivityResult; label: string; sho
   { value: 'MS', label: 'Moderately Sensitive', short: 'MS' },
 ];
 
-export type StaffRole = 'DOCTOR' | 'LAB_TECH' | 'OTHER';
+export type StaffRole = 'DOCTOR' | 'LAB_TECH' | 'CLERK' | 'OTHER';
 
 export interface MasterStaff {
   id: number;

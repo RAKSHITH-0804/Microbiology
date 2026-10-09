@@ -12,6 +12,7 @@ import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AuditLogEntry, AuditLogPage } from '@/types/admin';
+import { MODULE_LABELS, type ModuleKey } from '@/types/auth';
 
 const PAGE_SIZE = 25;
 
@@ -25,6 +26,10 @@ const ACTION_TONE: Record<string, BadgeProps['tone']> = {
   RESTORE: 'emerald',
   DEACTIVATE: 'red',
   DELETE: 'red',
+  PAYMENT_UPDATE: 'blue',
+  VERIFIED_PAYMENT_OVERRIDE: 'red',
+  REVENUE_EXPORT: 'violet',
+  PERMISSION_UPDATE: 'violet',
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -37,6 +42,7 @@ const ENTITY_LABEL: Record<string, string> = {
   master_samples: 'Sample type',
   master_test_templates: 'Finding template',
   master_staff: 'Staff member',
+  payments: 'Revenue ledger',
 };
 
 const entityLabel = (name: string) => ENTITY_LABEL[name] ?? name;
@@ -66,6 +72,18 @@ function describe(e: AuditLogEntry): string {
       const tests = ((d.tests_added as unknown[])?.length ?? 0) + ((d.tests_removed as unknown[])?.length ?? 0);
       const parts = [...changed.map((c) => c.replace(/_/g, ' ')), ...(tests ? ['tests'] : [])];
       return `Edited requisition${lab}${parts.length ? ` - ${parts.join(', ')}` : ''}`;
+    }
+    case 'PERMISSION_UPDATE:users': {
+      const module = MODULE_LABELS[d.module_key as ModuleKey] ?? String(d.module_key ?? '');
+      return `${d.to ? 'Enabled' : 'Disabled'} ${module} for "${String(d.username ?? '')}"`;
+    }
+    case 'PAYMENT_UPDATE:requisitions':
+      return `Updated payment for${lab}`;
+    case 'VERIFIED_PAYMENT_OVERRIDE:requisitions':
+      return `HOD override of verified bill for${lab}: "${String(d.reason ?? '')}"`;
+    case 'REVENUE_EXPORT:payments': {
+      const range = d.start_date && d.end_date ? ` (${String(d.start_date)} to ${String(d.end_date)})` : '';
+      return `Exported ${String(d.rows_exported ?? 0)} revenue transaction(s) as ${String(d.format ?? '')}${range}`;
     }
     case 'VERIFY:general_reports':
     case 'VERIFY:antibiogram_reports':

@@ -1,16 +1,17 @@
 import { z } from 'zod';
 
-export const PAYMENT_STATUSES = ['PAID', 'PARTIAL', 'UNPAID', 'EXEMPT'] as const;
-export const PAYMENT_MODES = ['CASH', 'UPI', 'CARD', 'HOSPITAL_CREDIT'] as const;
+export const PAYMENT_STATUSES = ['PAID', 'PARTIAL', 'UNPAID', 'HOSPITAL_CREDIT', 'EXEMPT'] as const;
+export const PAYMENT_MODES = ['CASH', 'CARD', 'UPI', 'HOSPITAL_CREDIT', 'EXEMPT'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
 /** Only these statuses release a requisition to the Pending Worklist for report entry. */
-export const RELEASED_PAYMENT_STATUSES: readonly PaymentStatus[] = ['PAID', 'EXEMPT'];
+export const RELEASED_PAYMENT_STATUSES: readonly PaymentStatus[] = ['PAID', 'HOSPITAL_CREDIT', 'EXEMPT'];
 
-/** Hospital credit means the patient is not billed at the counter, so the requisition is exempt. */
+/** Hospital credit and exemption need no counter payment; the mode alone decides the status. */
 export function derivePaymentStatus(total: number, paid: number, mode: PaymentMode | null): PaymentStatus {
-  if (mode === 'HOSPITAL_CREDIT') return 'EXEMPT';
+  if (mode === 'HOSPITAL_CREDIT') return 'HOSPITAL_CREDIT';
+  if (mode === 'EXEMPT') return 'EXEMPT';
   if (total > 0 && paid >= total) return 'PAID';
   return paid > 0 ? 'PARTIAL' : 'UNPAID';
 }
@@ -32,6 +33,13 @@ export const paymentFields = {
     .transform((v) => v ?? null),
   /** Optional; when sent it must agree with the amounts, which are the source of truth. */
   payment_status: z.enum(PAYMENT_STATUSES).optional(),
+  /** Who referred or authorised a fee exemption; required for EXEMPT, ignored otherwise. */
+  exempt_referred_by: z
+    .string()
+    .trim()
+    .max(255, 'Referred by must be at most 255 characters')
+    .nullish()
+    .transform((v) => (v ? v : null)),
 };
 
 type PaymentInput = {
@@ -39,12 +47,20 @@ type PaymentInput = {
   paid_amount: number;
   payment_mode: PaymentMode | null;
   payment_status?: PaymentStatus;
+  exempt_referred_by: string | null;
 };
 
 export function checkPayment(v: PaymentInput, ctx: z.RefinementCtx) {
-  const exempt = v.payment_mode === 'HOSPITAL_CREDIT';
+  const exempt = v.payment_mode === 'EXEMPT';
   if (!exempt && v.total_amount <= 0) {
     ctx.addIssue({ code: 'custom', path: ['total_amount'], message: 'Enter the total amount' });
+  }
+  if (exempt && !v.exempt_referred_by) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['exempt_referred_by'],
+      message: 'Enter who referred or authorised the exemption',
+    });
   }
   if (v.paid_amount > v.total_amount) {
     ctx.addIssue({ code: 'custom', path: ['paid_amount'], message: 'Amount paid cannot exceed the total amount' });
@@ -62,7 +78,18 @@ export function checkPayment(v: PaymentInput, ctx: z.RefinementCtx) {
   }
 }
 
-export const updatePaymentSchema = z.object(paymentFields).superRefine(checkPayment);
+const billingSchema = z.object(paymentFields).superRefine(checkPayment);
+
+/** Minimum length of the HOD's reason for changing the bill of a verified requisition. */
+export const OVERRIDE_REASON_MIN = 10;
+
+export const updatePaymentSchema = z
+  .object({
+    ...paymentFields,
+    /** Only required (and only accepted from the HOD) once the requisition is verified. */
+    reason: z.string().trim().max(500, 'Reason is too long').optional(),
+  })
+  .superRefine(checkPayment);
 export type UpdatePaymentInput = z.infer<typeof updatePaymentSchema>;
 
 export interface Billing {
@@ -70,15 +97,23 @@ export interface Billing {
   paid_amount: number;
   payment_mode: PaymentMode | null;
   payment_status: PaymentStatus;
+  exempt_referred_by: string | null;
 }
 
-/** Billing to store from a requisition save. Throws a ZodError (400) when the amounts are invalid. */
-export function billingFor(body: Partial<Record<keyof UpdatePaymentInput, unknown>>): Billing {
-  const p = updatePaymentSchema.parse({
+/** Billing to store from a save. Throws a ZodError (400) when the amounts are invalid. */
+export function billingFor(body: Partial<Record<keyof Billing, unknown>>): Billing {
+  const p = billingSchema.parse({
     total_amount: body.total_amount,
     paid_amount: body.paid_amount,
     payment_mode: body.payment_mode,
     payment_status: body.payment_status,
+    exempt_referred_by: body.exempt_referred_by,
   });
-  return { ...p, payment_status: derivePaymentStatus(p.total_amount, p.paid_amount, p.payment_mode) };
+  return {
+    total_amount: p.total_amount,
+    paid_amount: p.paid_amount,
+    payment_mode: p.payment_mode,
+    payment_status: derivePaymentStatus(p.total_amount, p.paid_amount, p.payment_mode),
+    exempt_referred_by: p.payment_mode === 'EXEMPT' ? p.exempt_referred_by : null,
+  };
 }

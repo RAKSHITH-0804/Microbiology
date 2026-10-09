@@ -10,17 +10,12 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { FormField } from '@/components/FormField';
-import {
-  PRINT_LOCKED_MESSAGE,
-  PrintLockedNotice,
-  ReportActionBar,
-  ReportPageFrame,
-} from '@/components/reports/ReportPageFrame';
+import { NothingToPrintNotice, ReportActionBar, ReportPageFrame } from '@/components/reports/ReportPageFrame';
 import { ReportPrintLayout } from '@/components/reports/ReportPrintLayout';
 import { RequisitionSummaryCard } from '@/components/reports/RequisitionSummaryCard';
 import { SignatoryFields } from '@/components/reports/SignatoryFields';
 import { fetchFindingTemplates, saveGeneralReport } from '@/features/reports/api';
-import { usePrintOnLoad } from '@/features/reports/usePrintOnLoad';
+import { useReportAccess } from '@/features/reports/useReportAccess';
 import { useReportData } from '@/features/reports/useReportData';
 import { getErrorMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -67,7 +62,7 @@ export default function GeneralReportPage() {
     getValues,
     setValue,
     setError,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
   const loadedRequisition = data?.requisition;
@@ -80,9 +75,12 @@ export default function GeneralReportPage() {
   const requisition = data?.requisition;
   const templates = data?.extra ?? [];
   const values = watch();
-  const readOnly = requisition?.status === 'VERIFIED' || !!requisition?.general_report?.is_verified;
-  const printLocked = !requisition?.general_report?.is_verified;
-  usePrintOnLoad(!!requisition, !printLocked);
+  const { readOnly, readOnlyMessage, draft, printable, print } = useReportAccess({
+    loaded: !!requisition,
+    report: requisition?.general_report,
+    requisitionVerified: requisition?.status === 'VERIFIED',
+    isDirty,
+  });
 
   const relevantNames = useMemo(
     () => [...new Set(requisition?.tests.map((t) => t.template_test_name).filter((n): n is string => !!n) ?? [])],
@@ -149,10 +147,6 @@ export default function GeneralReportPage() {
   };
 
   const invalid = () => toast.error('Please correct the highlighted fields');
-  const onPrint = () => {
-    if (printLocked) toast.error(PRINT_LOCKED_MESSAGE);
-    else window.print();
-  };
   const onSave = handleSubmit(async (v) => {
     await save(v);
   }, invalid);
@@ -278,17 +272,24 @@ export default function GeneralReportPage() {
               </CardContent>
             </Card>
 
-            <ReportActionBar saving={isSubmitting} readOnly={readOnly} printLocked={printLocked} onPrint={onPrint} />
+            <ReportActionBar
+              saving={isSubmitting}
+              readOnly={readOnly}
+              readOnlyMessage={readOnlyMessage}
+              draft={draft}
+              onPrint={print}
+            />
           </form>
         )}
       </ReportPageFrame>
 
-      {requisition && printLocked && <PrintLockedNotice />}
-      {requisition && !printLocked && (
+      {requisition && !printable && <NothingToPrintNotice />}
+      {requisition && printable && (
         <ReportPrintLayout
           title="Microbiology Report"
           requisition={requisition}
           reportingDateTime={requisition.general_report?.reporting_datetime ?? null}
+          draft={draft}
           preparedBy={staffById(values.prepared_by)}
           reportedBy={staffById(values.reported_by)}
         >

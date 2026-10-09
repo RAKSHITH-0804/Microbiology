@@ -4,9 +4,14 @@ import { query, withTransaction } from '../../config/db';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
 import { AuthUser } from '../../utils/jwt';
-import { assertRequisitionUnlocked } from '../../utils/reportLock';
-import { billingFor, derivePaymentStatus, RELEASED_PAYMENT_STATUSES, UpdatePaymentInput } from './payment';
-import { CreateRequisitionInput, ListRequisitionsQuery } from './requisition.schema';
+import { assertRequisitionUnlocked, isRequisitionLocked } from '../../utils/reportLock';
+import {
+  billingFor,
+  OVERRIDE_REASON_MIN,
+  RELEASED_PAYMENT_STATUSES,
+  UpdatePaymentInput,
+} from './payment';
+import { CreateRequisitionInput, ListRequisitionsQuery, StatusSearchQuery } from './requisition.schema';
 
 type PatientInput = CreateRequisitionInput['patient'];
 
@@ -58,11 +63,15 @@ async function assertTestsInCatalog(client: PoolClient, tests: CreateRequisition
   }
 }
 
+/** Only the Super Admin may back-date or correct the receiving time; everyone else gets the server clock. */
+const canSetReceivedTime = (user: AuthUser) => user.role === 'SUPER_ADMIN';
+
 export async function createRequisition(req: Request, res: Response) {
   const input = req.body as CreateRequisitionInput;
   const userId = req.user!.sub;
   const hospital = input.hospital === 'Other' ? input.hospital_other : input.hospital;
   const billing = billingFor(input);
+  const receivedAt = canSetReceivedTime(req.user!) ? input.sample_received_datetime : new Date();
 
   try {
     const result = await withTransaction(async (client) => {
@@ -83,8 +92,8 @@ export async function createRequisition(req: Request, res: Response) {
            lab_no, receipt_no, patient_id, hospital, consultant_doctor, op_ip_no, ward_unit,
            clinical_diagnosis, preferred_antibiotics, antibiotics_used, sample_nature, site_of_collection,
            sample_collection_datetime, sample_received_datetime, status, created_by,
-           address, total_amount, paid_amount, payment_status, payment_mode
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15,$16,$17,$18,$19,$20)
+           address, total_amount, paid_amount, payment_status, payment_mode, exempt_referred_by
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15,$16,$17,$18,$19,$20,$21)
          RETURNING id, lab_no, status, payment_status, sample_received_datetime`,
         [
           input.lab_no,
@@ -100,13 +109,14 @@ export async function createRequisition(req: Request, res: Response) {
           input.sample_nature,
           input.site_of_collection,
           input.sample_collection_datetime,
-          input.sample_received_datetime,
+          receivedAt,
           userId,
           input.address,
           billing.total_amount,
           billing.paid_amount,
           billing.payment_status,
           billing.payment_mode,
+          billing.exempt_referred_by,
         ],
       );
       const requisition = rows[0];
@@ -136,6 +146,7 @@ export async function createRequisition(req: Request, res: Response) {
             paid_amount: billing.paid_amount,
             payment_status: billing.payment_status,
             payment_mode: billing.payment_mode,
+            ...(billing.exempt_referred_by && { exempt_referred_by: billing.exempt_referred_by }),
           },
         },
         client,
@@ -172,6 +183,7 @@ const EDITABLE_COLUMNS = [
   'paid_amount',
   'payment_status',
   'payment_mode',
+  'exempt_referred_by',
 ] as const;
 type EditableColumn = (typeof EDITABLE_COLUMNS)[number];
 
@@ -235,7 +247,8 @@ export async function updateRequisition(req: Request, res: Response) {
 
       const after: Record<EditableColumn, unknown> = {
         lab_no: input.lab_no,
-        receipt_no: input.receipt_no,
+        // The receipt is issued at registration and ties the sample to the bill, so edits keep it.
+        receipt_no: before.receipt_no,
         hospital,
         consultant_doctor: input.consultant_doctor,
         op_ip_no: input.op_ip_no,
@@ -246,7 +259,9 @@ export async function updateRequisition(req: Request, res: Response) {
         sample_nature: input.sample_nature,
         site_of_collection: input.site_of_collection,
         sample_collection_datetime: input.sample_collection_datetime,
-        sample_received_datetime: input.sample_received_datetime,
+        sample_received_datetime: canSetReceivedTime(req.user!)
+          ? input.sample_received_datetime
+          : before.sample_received_datetime,
         address: input.address,
         ...billing,
       };
@@ -310,13 +325,20 @@ export async function updateRequisition(req: Request, res: Response) {
   }
 }
 
+/** Staff named in `column` on the general and antibiogram reports, e.g. "A, B"; null before any report. */
+const reportStaffNames = (column: 'prepared_by' | 'reported_by') => `
+  (SELECT string_agg(DISTINCT s.name, ', ')
+   FROM master_staff s
+   WHERE s.id IN (SELECT g.${column} FROM general_reports g WHERE g.requisition_id = r.id
+                  UNION SELECT a.${column} FROM antibiogram_reports a WHERE a.requisition_id = r.id))`;
+
 export const REQUISITION_SELECT = `
   SELECT r.id, r.lab_no, r.receipt_no, r.status, r.hospital, r.consultant_doctor,
          r.op_ip_no, r.ward_unit, r.clinical_diagnosis, r.preferred_antibiotics, r.antibiotics_used,
          r.sample_nature, r.site_of_collection,
          r.sample_collection_datetime, r.sample_received_datetime, r.created_at,
          r.address, r.total_amount::float8 AS total_amount, r.paid_amount::float8 AS paid_amount,
-         r.payment_status, r.payment_mode,
+         r.payment_status, r.payment_mode, r.exempt_referred_by,
          json_build_object(
            'id', p.id, 'name', p.name, 'age_value', p.age_value,
            'age_unit', p.age_unit, 'age_years', p.age_years, 'age_months', p.age_months,
@@ -337,7 +359,9 @@ export const REQUISITION_SELECT = `
          (SELECT g.id FROM general_reports g WHERE g.requisition_id = r.id) AS general_report_id,
          (SELECT a.id FROM antibiogram_reports a WHERE a.requisition_id = r.id) AS antibiogram_report_id,
          (SELECT g.is_verified FROM general_reports g WHERE g.requisition_id = r.id) AS general_report_verified,
-         (SELECT a.is_verified FROM antibiogram_reports a WHERE a.requisition_id = r.id) AS antibiogram_report_verified
+         (SELECT a.is_verified FROM antibiogram_reports a WHERE a.requisition_id = r.id) AS antibiogram_report_verified,
+         ${reportStaffNames('prepared_by')} AS prepared_by_name,
+         ${reportStaffNames('reported_by')} AS reported_by_name
   FROM requisitions r
   JOIN patients p ON p.id = r.patient_id`;
 
@@ -366,35 +390,43 @@ export async function listPendingRequisitions(req: Request, res: Response) {
 }
 
 /**
- * Settles or corrects billing. Deliberately not blocked by the report lock: a bill can be
- * paid after the reports are verified without reopening any clinical data.
+ * Settles or corrects billing. Once a report is verified only the HOD may change the bill,
+ * with a written reason that is kept in the audit trail.
  */
 export async function updatePayment(req: Request, res: Response) {
   const id = Number(req.params.id);
   const input = req.body as UpdatePaymentInput;
-  const paymentStatus = derivePaymentStatus(input.total_amount, input.paid_amount, input.payment_mode);
+  const after = billingFor(input);
 
   const result = await withTransaction(async (client) => {
     const existing = await client.query<{
       lab_no: string;
+      status: string;
       total_amount: number;
       paid_amount: number;
       payment_status: string;
       payment_mode: string | null;
+      exempt_referred_by: string | null;
     }>(
-      `SELECT lab_no, total_amount::float8 AS total_amount, paid_amount::float8 AS paid_amount, payment_status, payment_mode
+      `SELECT lab_no, status, total_amount::float8 AS total_amount, paid_amount::float8 AS paid_amount,
+              payment_status, payment_mode, exempt_referred_by
        FROM requisitions WHERE id = $1 FOR UPDATE`,
       [id],
     );
     const before = existing.rows[0];
     if (!before) throw new AppError(404, 'Requisition not found');
+    const override = await isRequisitionLocked(client, id, before.status);
+    if (override) {
+      if (req.user!.role !== 'HOD') {
+        throw new AppError(403, 'Only the HOD can modify payment details after report verification');
+      }
+      if ((input.reason?.length ?? 0) < OVERRIDE_REASON_MIN) {
+        throw new AppError(400, 'An override reason is required to change the bill of a verified report', {
+          reason: [`Enter at least ${OVERRIDE_REASON_MIN} characters explaining the change`],
+        });
+      }
+    }
 
-    const after = {
-      total_amount: input.total_amount,
-      paid_amount: input.paid_amount,
-      payment_status: paymentStatus,
-      payment_mode: input.payment_mode,
-    };
     const changes = Object.fromEntries(
       (Object.keys(after) as (keyof typeof after)[])
         .filter((k) => (before[k] ?? null) !== (after[k] ?? null))
@@ -406,17 +438,17 @@ export async function updatePayment(req: Request, res: Response) {
 
     await client.query(
       `UPDATE requisitions
-       SET total_amount = $2, paid_amount = $3, payment_status = $4, payment_mode = $5
+       SET total_amount = $2, paid_amount = $3, payment_status = $4, payment_mode = $5, exempt_referred_by = $6
        WHERE id = $1`,
-      [id, after.total_amount, after.paid_amount, after.payment_status, after.payment_mode],
+      [id, after.total_amount, after.paid_amount, after.payment_status, after.payment_mode, after.exempt_referred_by],
     );
     await writeAuditLog(
       {
         userId: req.user!.sub,
-        action: 'PAYMENT_UPDATE',
+        action: override ? 'VERIFIED_PAYMENT_OVERRIDE' : 'PAYMENT_UPDATE',
         entityName: 'requisitions',
         entityId: id,
-        details: { lab_no: before.lab_no, changes },
+        details: { requisition_id: id, lab_no: before.lab_no, changes, ...(override && { reason: input.reason }) },
       },
       client,
     );
@@ -523,6 +555,73 @@ export async function getRequisition(req: Request, res: Response) {
     success: true,
     data: { ...requisition, general_report: generalReport, antibiogram_report: antibiogramReport },
   });
+}
+
+const TIMELINE_REPORT_COLUMNS = (type: string, alias: string) => `
+  SELECT '${type}' AS report_type, ${alias}.created_at AS drafted_at, ${alias}.is_verified, ${alias}.verified_at,
+         ${alias}.reported_by, pb.name AS prepared_by_name, rb.name AS reported_by_name, vb.name AS verified_by_name`;
+const TIMELINE_REPORT_JOINS = (alias: string) => `
+  LEFT JOIN master_staff pb ON pb.id = ${alias}.prepared_by
+  LEFT JOIN master_staff rb ON rb.id = ${alias}.reported_by
+  LEFT JOIN master_staff vb ON vb.id = ${alias}.verified_by
+  WHERE ${alias}.requisition_id = $1`;
+
+/** Lifecycle of one sample: registration, billing, report drafting and verification, with who did each step. */
+export async function getRequisitionTimeline(req: Request, res: Response) {
+  const id = Number(req.params.id);
+  const [requisition, reports] = await Promise.all([
+    query(
+      `SELECT r.id, r.lab_no, r.status, p.name AS patient_name,
+              r.sample_received_datetime AS received_at, COALESCE(s.name, u.username) AS received_by,
+              r.payment_status, r.payment_mode, r.exempt_referred_by,
+              r.total_amount::float8 AS total_amount, r.paid_amount::float8 AS paid_amount
+       FROM requisitions r
+       JOIN patients p ON p.id = r.patient_id
+       LEFT JOIN users u ON u.id = r.created_by
+       LEFT JOIN master_staff s ON s.id = u.staff_id
+       WHERE r.id = $1`,
+      [id],
+    ),
+    query<ReportRow>(
+      `${TIMELINE_REPORT_COLUMNS('general', 'g')} FROM general_reports g ${TIMELINE_REPORT_JOINS('g')}
+       UNION ALL
+       ${TIMELINE_REPORT_COLUMNS('antibiogram', 'a')} FROM antibiogram_reports a ${TIMELINE_REPORT_JOINS('a')}
+       ORDER BY drafted_at`,
+      [id],
+    ),
+  ]);
+  if (!requisition.rows[0]) throw new AppError(404, 'Requisition not found');
+  assertDoctorCanView(req.user!, reports.rows);
+
+  const reportRows = reports.rows.map(({ reported_by: _reportedBy, ...r }) => r);
+  res.json({ success: true, data: { ...requisition.rows[0], reports: reportRows } });
+}
+
+/** Finds samples for the Status Timeline page; without a term, lists the most recently received. */
+export async function searchRequisitionStatus(req: Request, res: Response) {
+  const { q } = req.query as unknown as StatusSearchQuery;
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (req.user!.role === 'DOCTOR') {
+    params.push(req.user!.staff_id);
+    conditions.push(assignedToDoctor(`$${params.length}`));
+  }
+  if (q) {
+    params.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`);
+    const p = `$${params.length}`;
+    conditions.push(`(r.lab_no ILIKE ${p} OR r.receipt_no ILIKE ${p} OR p.name ILIKE ${p})`);
+  }
+
+  const { rows } = await query(
+    `SELECT r.id, r.lab_no, r.receipt_no, p.name AS patient_name, r.sample_nature,
+            r.sample_received_datetime, r.status, r.payment_status
+     FROM requisitions r JOIN patients p ON p.id = r.patient_id
+     ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+     ORDER BY r.sample_received_datetime DESC, r.id DESC
+     LIMIT 25`,
+    params,
+  );
+  res.json({ success: true, data: rows });
 }
 
 /** Doctors may only open a requisition when one of its reports names them as reporting doctor. */

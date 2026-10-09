@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { PRINT_LOCKED_MESSAGE } from '@/components/reports/ReportPageFrame';
+import { NOTHING_TO_PRINT_MESSAGE } from '@/components/reports/ReportPageFrame';
 
 /**
  * Opens the print dialog once when the page was linked with `?print=1` (e.g. "View & Print" in the archive)
- * and the report has loaded and is printable (verified). The param is removed so a reload or Back does not print again.
+ * and the report has loaded and is printable (saved at least once). The param is removed so a reload or Back does not print again.
  */
 export function usePrintOnLoad(loaded: boolean, printable: boolean) {
   const [params, setParams] = useSearchParams();
@@ -26,7 +26,7 @@ export function usePrintOnLoad(loaded: boolean, printable: boolean) {
     if (!printable) {
       handled.current = true;
       clearParam();
-      toast.error(PRINT_LOCKED_MESSAGE);
+      toast.error(NOTHING_TO_PRINT_MESSAGE);
       return;
     }
     // Give the form one render to fill the print layout with the loaded report.

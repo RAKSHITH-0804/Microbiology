@@ -114,6 +114,16 @@ async function insertStaff(client: PoolClient, actorId: number, input: CreateUse
   return rows[0].id;
 }
 
+/** Roles the system cannot run without: removing the last active account would lock everyone out of it. */
+const ESSENTIAL_ROLES: Record<string, string> = { SUPER_ADMIN: 'Super Admin', HOD: 'HOD' };
+
+async function assertNotLastActive(client: PoolClient, id: number, role: string) {
+  const label = ESSENTIAL_ROLES[role];
+  if (!label) return;
+  const others = await client.query('SELECT 1 FROM users WHERE role = $1 AND is_active AND id <> $2', [role, id]);
+  if (!others.rowCount) throw new AppError(400, `At least one active ${label} account must remain`);
+}
+
 export async function setUserStatus(req: Request, res: Response) {
   const id = Number(req.params.id);
   const { is_active } = req.body as UserStatusInput;
@@ -128,10 +138,7 @@ export async function setUserStatus(req: Request, res: Response) {
     const target = rows[0];
     if (!target) throw new AppError(404, 'User not found');
 
-    if (!is_active && target.role === 'HOD' && target.is_active) {
-      const others = await client.query(`SELECT 1 FROM users WHERE role = 'HOD' AND is_active AND id <> $1`, [id]);
-      if (!others.rowCount) throw new AppError(400, 'At least one active HOD account must remain');
-    }
+    if (!is_active && target.is_active) await assertNotLastActive(client, id, target.role);
 
     if (target.is_active !== is_active) {
       await client.query('UPDATE users SET is_active = $2 WHERE id = $1', [id, is_active]);
@@ -166,11 +173,12 @@ export async function deleteUser(req: Request, res: Response) {
     const { rows } = await client.query<{
       username: string;
       role: string;
+      is_active: boolean;
       staff_id: number | null;
       staff_name: string | null;
       has_clinical_records: boolean;
     }>(
-      `SELECT u.username, u.role, u.staff_id, s.name AS staff_name, ${HAS_CLINICAL_RECORDS} AS has_clinical_records
+      `SELECT u.username, u.role, u.is_active, u.staff_id, s.name AS staff_name, ${HAS_CLINICAL_RECORDS} AS has_clinical_records
        FROM users u LEFT JOIN master_staff s ON s.id = u.staff_id
        WHERE u.id = $1
        FOR UPDATE OF u`,
@@ -181,6 +189,7 @@ export async function deleteUser(req: Request, res: Response) {
     if (target.has_clinical_records) {
       throw new AppError(400, 'Cannot delete user with existing clinical records. Disable the account instead.');
     }
+    if (target.is_active) await assertNotLastActive(client, id, target.role);
 
     await client.query('DELETE FROM users WHERE id = $1', [id]);
 

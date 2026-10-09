@@ -10,7 +10,7 @@ const router = Router();
 router.use(requireAuth);
 // Everyone reads the settings: printouts use the letterhead, the requisition form the lab number prefix.
 router.get('/', asyncHandler(getSettings));
-router.patch('/', requireRole('HOD'), validate({ body: updateSettingsSchema }), asyncHandler(updateSettings));
-router.get('/system', requireRole('HOD'), asyncHandler(getSystemInfo));
+router.patch('/', requireRole('SUPER_ADMIN', 'HOD'), validate({ body: updateSettingsSchema }), asyncHandler(updateSettings));
+router.get('/system', requireRole('SUPER_ADMIN', 'HOD'), asyncHandler(getSystemInfo));
 
 export default router;

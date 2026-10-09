@@ -12,6 +12,7 @@ export async function listStaff(_req: Request, res: Response) {
             CASE
               WHEN staff_type = 'TEACHING' THEN 'DOCTOR'
               WHEN designation ILIKE '%lab%tech%' THEN 'LAB_TECH'
+              WHEN designation ILIKE '%clerk%' THEN 'CLERK'
               ELSE 'OTHER'
             END AS staff_role
      FROM master_staff

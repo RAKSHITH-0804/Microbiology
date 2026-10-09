@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { MicroscopeWatermark } from '@/components/reports/MicroscopeWatermark';
+import { DRAFT_PRINT_TITLE } from '@/components/reports/ReportPageFrame';
 import { useSettings } from '@/context/SettingsContext';
 import { formatAge, formatDateTime, formatDoctorName, formatSex } from '@/lib/format';
 import type { MasterStaff, RequisitionDetail } from '@/types/report';
@@ -8,6 +10,8 @@ interface ReportPrintLayoutProps {
   requisition: RequisitionDetail;
   /** When the report was last saved; null until the first save. */
   reportingDateTime: string | null;
+  /** Unverified report: watermarked, and no signatory names or signatures are printed. */
+  draft: boolean;
   preparedBy?: MasterStaff;
   reportedBy?: MasterStaff;
   children: ReactNode;
@@ -28,6 +32,7 @@ export function ReportPrintLayout({
   title,
   requisition: r,
   reportingDateTime,
+  draft,
   preparedBy,
   reportedBy,
   children,
@@ -35,12 +40,30 @@ export function ReportPrintLayout({
   const { settings, printPrefs } = useSettings();
 
   return (
-    <div className="print-report hidden font-serif text-[11pt] leading-snug text-black print:flex">
+    <div className="print-report relative hidden font-serif text-[11pt] leading-snug text-black print:flex">
+      {draft ? (
+        // position: fixed repeats the watermark on every printed page.
+        <div aria-hidden className="pointer-events-none fixed inset-0 z-0 flex items-center justify-center">
+          <div className="-rotate-[35deg] text-center font-sans font-bold uppercase leading-tight text-black/[0.09]">
+            <p className="text-[72pt] tracking-[0.15em]">Draft</p>
+            <p className="text-[20pt] tracking-[0.1em]">Not for medico-legal purposes</p>
+          </div>
+        </div>
+      ) : (
+        <MicroscopeWatermark />
+      )}
+
       <header className="border-b-[3px] border-double border-black pb-2 text-center">
         <p className="text-[12pt] font-bold">{settings.letterhead_line1}</p>
         <p className="mt-0.5 text-[16pt] font-bold tracking-wider">{settings.letterhead_line2}</p>
         <p className="mt-0.5 text-[13pt] font-bold tracking-wide">{settings.letterhead_line3}</p>
       </header>
+
+      {draft && (
+        <p className="mt-3 border-2 border-black py-1 text-center font-sans text-[11pt] font-bold tracking-wide">
+          {DRAFT_PRINT_TITLE}
+        </p>
+      )}
 
       <h1 className="my-3 text-center text-[13pt] font-bold uppercase underline underline-offset-4">{title}</h1>
 
@@ -70,21 +93,27 @@ export function ReportPrintLayout({
 
       {printPrefs.show_end_of_report && <p className="mt-6 text-center text-[10pt] tracking-widest">*** End of Report ***</p>}
 
-      <footer className="print-signatures mt-4 flex items-end justify-between gap-6">
-        <div className="w-[44%] text-left">
-          <div className="text-[11pt] font-bold">Prepared by: {preparedBy?.name ?? '\u00A0'}</div>
-          <div className="text-[10pt]">(Lab Technician)</div>
-          <div className="text-[10pt]">&nbsp;</div>
-        </div>
-        <div className="w-[48%] text-center">
-          <div className="h-16" />
-          <div className="border-t border-black pt-1 text-[11pt] font-bold">
-            Reported by: {reportedBy ? formatDoctorName(reportedBy.name) : '\u00A0'}
+      {draft ? (
+        <footer className="print-signatures mt-4 border-t border-black pt-2 text-center text-[10pt] italic">
+          Unverified draft - not signed. Valid only after verification by the reporting doctor.
+        </footer>
+      ) : (
+        <footer className="print-signatures mt-4 flex items-end justify-between gap-6">
+          <div className="w-[44%] text-left">
+            <div className="text-[11pt] font-bold">Prepared by: {preparedBy?.name ?? '\u00A0'}</div>
+            <div className="text-[10pt]">(Lab Technician)</div>
+            <div className="text-[10pt]">&nbsp;</div>
           </div>
-          <div className="text-[10pt] font-bold uppercase tracking-wide">Department of Microbiology</div>
-          <div className="text-[10pt] font-bold uppercase tracking-wide">J.J.M. Medical College, Davangere</div>
-        </div>
-      </footer>
+          <div className="w-[48%] text-center">
+            <div className="h-16" />
+            <div className="border-t border-black pt-1 text-[11pt] font-bold">
+              Reported by: {reportedBy ? formatDoctorName(reportedBy.name) : '\u00A0'}
+            </div>
+            <div className="text-[10pt] font-bold uppercase tracking-wide">Department of Microbiology</div>
+            <div className="text-[10pt] font-bold uppercase tracking-wide">J.J.M. Medical College, Davangere</div>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }

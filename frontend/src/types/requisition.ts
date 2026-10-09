@@ -5,14 +5,15 @@ export type AgeUnit = 'Y' | 'M' | 'D';
 export type Sex = 'M' | 'F' | 'Other';
 export type RequisitionStatus = 'RECEIVED' | 'REPORT_ENTERED' | 'VERIFIED';
 
-export const PAYMENT_STATUSES = ['PAID', 'PARTIAL', 'UNPAID', 'EXEMPT'] as const;
+export const PAYMENT_STATUSES = ['PAID', 'PARTIAL', 'UNPAID', 'HOSPITAL_CREDIT', 'EXEMPT'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const PAYMENT_MODES = [
   { value: 'CASH', label: 'Cash' },
-  { value: 'UPI', label: 'UPI' },
   { value: 'CARD', label: 'Card' },
-  { value: 'HOSPITAL_CREDIT', label: 'Hospital Credit / Exempt' },
+  { value: 'UPI', label: 'UPI' },
+  { value: 'HOSPITAL_CREDIT', label: 'Hospital Credit' },
+  { value: 'EXEMPT', label: 'Exempt' },
 ] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number]['value'];
 
@@ -21,6 +22,8 @@ export interface PaymentPayload {
   paid_amount: number;
   payment_mode: PaymentMode | null;
   payment_status: PaymentStatus;
+  /** Who referred or authorised a fee exemption; null for other modes. */
+  exempt_referred_by: string | null;
 }
 
 /** What the Update Payment dialog needs, from either the directory or the revenue ledger. */
@@ -32,6 +35,9 @@ export interface PaymentTarget {
   paid_amount: number;
   payment_mode: PaymentMode | null;
   payment_status: PaymentStatus;
+  exempt_referred_by: string | null;
+  /** A verified report locks the bill; only the HOD may override it, with a reason. */
+  is_verified: boolean;
 }
 
 export interface UpdatedPayment extends PaymentPayload {
@@ -133,6 +139,7 @@ export interface PendingRequisition {
   paid_amount: number;
   payment_status: PaymentStatus;
   payment_mode: PaymentMode | null;
+  exempt_referred_by: string | null;
   patient: {
     id: number;
     name: string;
@@ -149,6 +156,22 @@ export interface PendingRequisition {
   antibiogram_report_id: number | null;
   general_report_verified: boolean | null;
   antibiogram_report_verified: boolean | null;
+  /** Lab technician(s) who prepared the report(s), e.g. "A, B"; null before any report. */
+  prepared_by_name: string | null;
+  /** Reporting doctor(s) named on the report(s); null before any report. */
+  reported_by_name: string | null;
+}
+
+/** One match on the Status Timeline search. */
+export interface StatusSearchResult {
+  id: number;
+  lab_no: string;
+  receipt_no: string | null;
+  patient_name: string;
+  sample_nature: string | null;
+  sample_received_datetime: string;
+  status: RequisitionStatus;
+  payment_status: PaymentStatus;
 }
 
 export interface RequisitionListParams {
@@ -169,10 +192,49 @@ export interface RequisitionListPage {
   statusCounts: Record<RequisitionStatus, number>;
 }
 
+export interface DashboardAnalytics {
+  categoryDistribution: { category: string; count: number }[];
+  yearlyComparison: {
+    currentYear: number;
+    previousYear: number;
+    /** Always twelve entries, month 1 (January) to 12. */
+    months: { month: number; currentYear: number; previousYear: number }[];
+  };
+  labTechProductivity: { id: number; name: string; drafted: number; verified: number }[];
+  doctorProductivity: { id: number; name: string; verified: number; pending: number }[];
+}
+
 export interface DashboardStats {
   samplesToday: number;
   pendingReports: number;
   awaitingVerification: number;
   verifiedThisWeek: number;
   recentRequisitions: PendingRequisition[];
+  /** Department-wide charts; only sent to the HOD and Super Admin. */
+  analytics: DashboardAnalytics | null;
+}
+
+export interface TimelineReport {
+  report_type: 'general' | 'antibiogram';
+  drafted_at: string;
+  is_verified: boolean;
+  verified_at: string | null;
+  prepared_by_name: string | null;
+  reported_by_name: string | null;
+  verified_by_name: string | null;
+}
+
+export interface RequisitionTimeline {
+  id: number;
+  lab_no: string;
+  status: RequisitionStatus;
+  patient_name: string;
+  received_at: string;
+  received_by: string | null;
+  payment_status: PaymentStatus;
+  payment_mode: PaymentMode | null;
+  exempt_referred_by: string | null;
+  total_amount: number;
+  paid_amount: number;
+  reports: TimelineReport[];
 }

@@ -1,13 +1,15 @@
 import { Request, Response } from 'express';
 import { query } from '../../config/db';
+import { writeAuditLog } from '../../utils/audit';
 import { PAYMENT_MODES } from '../requisitions/payment';
-import { PatientLedgerQuery, PaymentHistoryQuery, PaymentSummaryQuery } from './payment.schema';
+import { LogExportInput, PatientLedgerQuery, PaymentHistoryQuery, PaymentSummaryQuery } from './payment.schema';
 
 /**
  * Billing is recorded on the requisition itself (there is no per-instalment ledger), so
  * every figure here is attributed to the date the requisition was registered (created_at).
  */
-const BALANCE_DUE = `CASE WHEN r.payment_status = 'EXEMPT' THEN 0 ELSE r.total_amount - r.paid_amount END`;
+/** Hospital-credit bills are owed by the hospital and exempt bills are waived, so neither is a patient due. */
+const BALANCE_DUE = `CASE WHEN r.payment_status IN ('EXEMPT', 'HOSPITAL_CREDIT') THEN 0 ELSE r.total_amount - r.paid_amount END`;
 
 function buildFilters(q: PaymentSummaryQuery & { search?: string }) {
   const conditions: string[] = [];
@@ -36,6 +38,8 @@ interface SummaryRow {
   filtered_collection: number;
   filtered_billed: number;
   total_outstanding: number;
+  hospital_credit_total: number;
+  hospital_credit_count: string;
   exempt_total: number;
   exempt_count: string;
   transactions: string;
@@ -55,6 +59,8 @@ export async function getPaymentSummary(req: Request, res: Response) {
          COALESCE(SUM(r.paid_amount), 0)::float8 AS filtered_collection,
          COALESCE(SUM(r.total_amount), 0)::float8 AS filtered_billed,
          COALESCE(SUM(${BALANCE_DUE}), 0)::float8 AS total_outstanding,
+         COALESCE(SUM(r.total_amount) FILTER (WHERE r.payment_status = 'HOSPITAL_CREDIT'), 0)::float8 AS hospital_credit_total,
+         COUNT(*) FILTER (WHERE r.payment_status = 'HOSPITAL_CREDIT') AS hospital_credit_count,
          COALESCE(SUM(r.total_amount) FILTER (WHERE r.payment_status = 'EXEMPT'), 0)::float8 AS exempt_total,
          COUNT(*) FILTER (WHERE r.payment_status = 'EXEMPT') AS exempt_count,
          COUNT(*) AS transactions
@@ -93,6 +99,8 @@ export async function getPaymentSummary(req: Request, res: Response) {
       filtered_collection: t.filtered_collection,
       filtered_billed: t.filtered_billed,
       total_outstanding: t.total_outstanding,
+      hospital_credit_total: t.hospital_credit_total,
+      hospital_credit_count: Number(t.hospital_credit_count),
       exempt_total: t.exempt_total,
       exempt_count: Number(t.exempt_count),
       transactions: Number(t.transactions),
@@ -105,7 +113,10 @@ const TRANSACTION_COLUMNS = `
   r.id, r.lab_no, r.created_at, r.sample_received_datetime, r.status,
   p.id AS patient_id, p.name AS patient_name, p.phone,
   r.total_amount::float8 AS total_amount, r.paid_amount::float8 AS paid_amount,
-  (${BALANCE_DUE})::float8 AS balance_due, r.payment_mode, r.payment_status`;
+  (${BALANCE_DUE})::float8 AS balance_due, r.payment_mode, r.payment_status, r.exempt_referred_by,
+  (r.status = 'VERIFIED'
+    OR EXISTS (SELECT 1 FROM general_reports g WHERE g.requisition_id = r.id AND g.is_verified)
+    OR EXISTS (SELECT 1 FROM antibiogram_reports a WHERE a.requisition_id = r.id AND a.is_verified)) AS is_verified`;
 
 export async function getPaymentHistory(req: Request, res: Response) {
   const q = req.query as unknown as PaymentHistoryQuery;
@@ -130,6 +141,28 @@ export async function getPaymentHistory(req: Request, res: Response) {
     success: true,
     data: { items: items.rows, total: Number(count.rows[0].total), page: q.page, limit: q.limit },
   });
+}
+
+/** Exports are built in the browser, so the page reports each one here for the audit trail. */
+export async function logRevenueExport(req: Request, res: Response) {
+  const input = req.body as LogExportInput;
+  await writeAuditLog({
+    userId: req.user!.sub,
+    action: 'REVENUE_EXPORT',
+    entityName: 'payments',
+    details: {
+      format: input.exportFormat,
+      rows_exported: input.rowCount,
+      total_matching: input.totalMatching,
+      start_date: input.startDate ?? null,
+      end_date: input.endDate ?? null,
+      payment_mode: input.paymentMode ?? null,
+      payment_status: input.paymentStatus ?? null,
+      search: input.search || null,
+      ip: req.ip,
+    },
+  });
+  res.status(201).json({ success: true, message: 'Export recorded' });
 }
 
 export async function getPatientLedger(req: Request, res: Response) {

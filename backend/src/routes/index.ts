@@ -6,6 +6,7 @@ import authRoutes from '../modules/auth/auth.routes';
 import dashboardRoutes from '../modules/dashboard/dashboard.routes';
 import masterRoutes from '../modules/master/master.routes';
 import paymentRoutes from '../modules/payments/payment.routes';
+import permissionRoutes from '../modules/permissions/permission.routes';
 import reportRoutes from '../modules/reports/report.routes';
 import requisitionRoutes from '../modules/requisitions/requisition.routes';
 import settingsRoutes from '../modules/settings/settings.routes';
@@ -31,6 +32,7 @@ router.use('/requisitions', requisitionRoutes);
 router.use('/reports', reportRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
+router.use('/permissions', permissionRoutes);
 router.use('/audit-logs', auditRoutes);
 router.use('/settings', settingsRoutes);
 

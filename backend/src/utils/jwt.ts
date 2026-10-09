@@ -2,7 +2,7 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { CookieOptions } from 'express';
 import { env, isProduction } from '../config/env';
 
-export type UserRole = 'HOD' | 'DOCTOR' | 'LAB_TECH';
+export type UserRole = 'SUPER_ADMIN' | 'HOD' | 'DOCTOR' | 'LAB_TECH' | 'CLERK';
 
 export interface JwtPayload {
   sub: number;
@@ -16,6 +16,8 @@ export interface JwtPayload {
 export interface AuthUser extends JwtPayload {
   staff_id: number | null;
   must_change_password: boolean;
+  /** Module keys the Super Admin has switched off for this user (see user_permissions). */
+  disabled_modules: string[];
 }
 
 export const AUTH_COOKIE = 'token';
