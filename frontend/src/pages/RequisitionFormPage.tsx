@@ -9,8 +9,10 @@ import {
   CheckCircle2,
   ClipboardList,
   FlaskConical,
+  Info,
   Loader2,
   Lock,
+  ReceiptIndianRupee,
   RotateCcw,
   Save,
   TestTubes,
@@ -26,11 +28,13 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { DateTimePicker } from '@/components/DateTimePicker';
 import { FormField } from '@/components/FormField';
+import { AmountInput } from '@/components/AmountInput';
+import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
 import { createRequisition, fetchSamples, fetchTestCatalog, updateRequisition } from '@/features/requisitions/api';
 import { fetchRequisition } from '@/features/reports/api';
 import {
+  buildRequisitionFormSchema,
   fromRequisition,
-  requisitionFormSchema,
   RequisitionFormValues,
   SERVER_FIELD_MAP,
   stripDoctorPrefix,
@@ -39,9 +43,11 @@ import {
   toCreatePayload,
   withDoctorPrefix,
 } from '@/features/requisitions/requisitionForm.schema';
+import { computePayment, EMPTY_PAYMENT, formatRupees, isReleasedForReporting } from '@/features/requisitions/payment';
+import { useAuth } from '@/context/AuthContext';
 import { getErrorMessage } from '@/lib/api';
 import { toDateTimeLocal } from '@/lib/datetime';
-import { HOSPITALS, type MasterSample, type TestCategory } from '@/types/requisition';
+import { HOSPITALS, PAYMENT_MODES, type MasterSample, type PaymentStatus, type TestCategory } from '@/types/requisition';
 import type { RequisitionDetail } from '@/types/report';
 
 const SEX_OPTIONS = [
@@ -70,6 +76,7 @@ function emptyForm(): RequisitionFormValues {
     age: { years: '', months: '', days: '' },
     sex: '',
     phone: '',
+    address: '',
     consultant_doctor: '',
     op_ip_no: '',
     ward_unit: '',
@@ -82,6 +89,7 @@ function emptyForm(): RequisitionFormValues {
     site_of_collection: '',
     sample_collection_datetime: '',
     tests: [],
+    ...EMPTY_PAYMENT,
   };
 }
 
@@ -89,6 +97,7 @@ interface SavedInfo {
   labNo: string;
   patientName: string;
   testCount: number;
+  paymentStatus: PaymentStatus;
 }
 
 export default function RequisitionFormPage() {
@@ -106,6 +115,11 @@ export default function RequisitionFormPage() {
   const [editLoading, setEditLoading] = useState(isEdit);
   const [editError, setEditError] = useState<string | null>(null);
 
+  const { user } = useAuth();
+  // Doctors don't handle billing; the server ignores any payment fields they send.
+  const showBilling = user?.role !== 'DOCTOR';
+  const formSchema = useMemo(() => buildRequisitionFormSchema(showBilling), [showBilling]);
+
   const {
     register,
     control,
@@ -115,7 +129,7 @@ export default function RequisitionFormPage() {
     setError,
     formState: { errors, isSubmitting },
   } = useForm<RequisitionFormValues>({
-    resolver: zodResolver(requisitionFormSchema),
+    resolver: zodResolver(formSchema),
     defaultValues: emptyForm(),
     mode: 'onTouched',
   });
@@ -125,6 +139,12 @@ export default function RequisitionFormPage() {
   const phoneField = register('phone');
   const hospital = watch('hospital');
   const selectedTests = watch('tests');
+  const payment = computePayment({
+    total_amount: watch('total_amount'),
+    paid_amount: watch('paid_amount'),
+    payment_mode: watch('payment_mode'),
+  });
+  const balanceDue = Math.max(payment.total_amount - payment.paid_amount, 0);
 
   const loadMasters = useCallback(async () => {
     setMastersLoading(true);
@@ -193,13 +213,22 @@ export default function RequisitionFormPage() {
     try {
       if (isEdit) {
         if (!original) return;
-        await updateRequisition(original.id, toCreatePayload(values));
-        toast.success('Requisition updated successfully');
+        const updated = await updateRequisition(original.id, toCreatePayload(values));
+        toast.success('Requisition updated successfully', {
+          description: isReleasedForReporting(updated.payment_status)
+            ? undefined
+            : 'Payment pending - it stays off the Pending Worklist until paid.',
+        });
         navigate('/requisitions/pending');
         return;
       }
       const saved = await createRequisition(toCreatePayload(values));
-      setLastSaved({ labNo: saved.lab_no, patientName: values.patient_name.trim(), testCount: values.tests.length });
+      setLastSaved({
+        labNo: saved.lab_no,
+        patientName: values.patient_name.trim(),
+        testCount: values.tests.length,
+        paymentStatus: saved.payment_status,
+      });
       toast.success(`Requisition saved - Lab No ${saved.lab_no}`, {
         description: `${values.patient_name.trim()} - ${values.tests.length} investigation(s)`,
       });
@@ -287,6 +316,12 @@ export default function RequisitionFormPage() {
             <p className="mt-0.5 text-emerald-700">
               {lastSaved.patientName} - {lastSaved.testCount} investigation(s). The form is ready for the next sample.
             </p>
+            {!isReleasedForReporting(lastSaved.paymentStatus) && (
+              <p className="mt-1 flex items-center gap-1.5 text-amber-800">
+                <PaymentStatusBadge status={lastSaved.paymentStatus} />
+                Awaiting payment - it will reach the Pending Worklist once the bill is settled.
+              </p>
+            )}
           </div>
           <button type="button" onClick={() => setLastSaved(null)} aria-label="Dismiss" className="text-emerald-700 hover:text-emerald-900">
             <X className="h-4 w-4" />
@@ -453,6 +488,16 @@ export default function RequisitionFormPage() {
             <Input id="ward_unit" autoComplete="off" aria-invalid={!!errors.ward_unit} {...register('ward_unit')} />
           </FormField>
 
+          <FormField label="Patient Address" htmlFor="address" error={errors.address?.message} className="md:col-span-12">
+            <Textarea
+              id="address"
+              rows={2}
+              placeholder="House / street, village / town, taluk, district"
+              aria-invalid={!!errors.address}
+              {...register('address')}
+            />
+          </FormField>
+
           <FormField label="Clinical Diagnosis / Short History" htmlFor="clinical_diagnosis" error={errors.clinical_diagnosis?.message} className="md:col-span-12">
             <Textarea id="clinical_diagnosis" rows={2} aria-invalid={!!errors.clinical_diagnosis} {...register('clinical_diagnosis')} />
           </FormField>
@@ -597,6 +642,59 @@ export default function RequisitionFormPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Billing */}
+      {showBilling && (
+      <Card>
+        <CardHeader className="flex-row items-center gap-2 space-y-0">
+          <ReceiptIndianRupee className="h-4 w-4 text-primary" />
+          <CardTitle className="flex-1">Billing &amp; Payment</CardTitle>
+          <PaymentStatusBadge status={payment.payment_status} />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <FormField
+              label="Total Amount (₹)"
+              htmlFor="total_amount"
+              required={payment.payment_mode !== 'HOSPITAL_CREDIT'}
+              error={errors.total_amount?.message}
+            >
+              <AmountInput id="total_amount" aria-invalid={!!errors.total_amount} {...register('total_amount')} />
+            </FormField>
+            <FormField
+              label="Amount Paid (₹)"
+              htmlFor="paid_amount"
+              error={errors.paid_amount?.message}
+              hint={balanceDue > 0 && payment.payment_mode !== 'HOSPITAL_CREDIT' ? `Balance due ${formatRupees(balanceDue)}` : undefined}
+            >
+              <AmountInput id="paid_amount" aria-invalid={!!errors.paid_amount} {...register('paid_amount')} />
+            </FormField>
+            <FormField label="Payment Mode" htmlFor="payment_mode" error={errors.payment_mode?.message}>
+              <NativeSelect id="payment_mode" aria-invalid={!!errors.payment_mode} {...register('payment_mode')}>
+                <option value="">Select mode</option>
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </NativeSelect>
+            </FormField>
+            <FormField label="Payment Status" hint="Calculated from the amounts">
+              <div className="flex h-9 items-center rounded-md border border-dashed bg-muted/40 px-3">
+                <PaymentStatusBadge status={payment.payment_status} />
+              </div>
+            </FormField>
+          </div>
+          <p className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+            <Info className="mt-0.5 h-4 w-4 shrink-0" />
+            Requisitions will only advance to the Pending Worklist for reporting once payment status is marked as PAID or EXEMPT.
+          </p>
+          {readOnly && (
+            <p className="text-xs text-muted-foreground">
+              This requisition is locked. Settle the bill from the Requisitions directory using Update Payment.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+      )}
 
       <div className="sticky -bottom-6 z-20 -mx-6 -mb-6 border-t bg-white/95 backdrop-blur">
         <div className="flex items-center justify-end gap-3 px-6 py-3">

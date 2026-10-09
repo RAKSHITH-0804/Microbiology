@@ -3,7 +3,9 @@ import { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
+import { AuthUser } from '../../utils/jwt';
 import { REPORT_LOCKED_MESSAGE } from '../../utils/reportLock';
+import { PaymentStatus, RELEASED_PAYMENT_STATUSES } from '../requisitions/payment';
 import {
   AntibiogramReportInput,
   GeneralReportInput,
@@ -18,8 +20,14 @@ async function lockEditableRequisition(
   requisitionId: number,
   reportTable: 'general_reports' | 'antibiogram_reports',
 ) {
-  const { rows } = await client.query<{ id: number; lab_no: string; status: string; report_verified: boolean }>(
-    `SELECT r.id, r.lab_no, r.status,
+  const { rows } = await client.query<{
+    id: number;
+    lab_no: string;
+    status: string;
+    payment_status: string;
+    report_verified: boolean;
+  }>(
+    `SELECT r.id, r.lab_no, r.status, r.payment_status,
             EXISTS (SELECT 1 FROM ${reportTable} x WHERE x.requisition_id = r.id AND x.is_verified) AS report_verified
      FROM requisitions r WHERE r.id = $1 FOR UPDATE`,
     [requisitionId],
@@ -27,8 +35,44 @@ async function lockEditableRequisition(
   const requisition = rows[0];
   if (!requisition) throw new AppError(404, 'Requisition not found');
   if (requisition.status === 'VERIFIED' || requisition.report_verified) throw new AppError(400, REPORT_LOCKED_MESSAGE);
+  if (!RELEASED_PAYMENT_STATUSES.includes(requisition.payment_status as PaymentStatus)) {
+    throw new AppError(
+      400,
+      `Payment pending for ${requisition.lab_no} (${requisition.payment_status}). Record full payment or mark it exempt before entering reports.`,
+    );
+  }
   return requisition;
 }
+
+const AUTHOR_ONLY_MESSAGE = 'You can only author reports assigned to yourself';
+
+/**
+ * A doctor must name themselves as reporting doctor and cannot overwrite a report already
+ * assigned to another doctor. Lab technicians and the HOD may prepare reports for any doctor.
+ */
+async function assertDoctorAuthorship(
+  client: PoolClient,
+  user: AuthUser,
+  reportTable: 'general_reports' | 'antibiogram_reports',
+  requisitionId: number,
+  reportedBy: number,
+) {
+  if (user.role !== 'DOCTOR') return;
+  if (!user.staff_id || reportedBy !== user.staff_id) throw new AppError(403, AUTHOR_ONLY_MESSAGE);
+  const { rows } = await client.query<{ reported_by: number | null }>(
+    `SELECT reported_by FROM ${reportTable} WHERE requisition_id = $1`,
+    [requisitionId],
+  );
+  if (rows[0] && rows[0].reported_by !== user.staff_id) throw new AppError(403, AUTHOR_ONLY_MESSAGE);
+}
+
+/** Who saved the report, recorded in the audit trail alongside the acting user id. */
+const authoredBy = (user: AuthUser) => ({
+  user_id: user.sub,
+  username: user.username,
+  role: user.role,
+  staff_id: user.staff_id,
+});
 
 async function assertStaff(client: PoolClient, preparedBy: number, reportedBy: number) {
   const { rows } = await client.query<{ id: number }>(
@@ -54,6 +98,7 @@ export async function saveGeneralReport(req: Request, res: Response) {
 
   const report = await withTransaction(async (client) => {
     const requisition = await lockEditableRequisition(client, input.requisition_id, 'general_reports');
+    await assertDoctorAuthorship(client, req.user!, 'general_reports', input.requisition_id, input.reported_by);
     await assertStaff(client, input.prepared_by, input.reported_by);
 
     const { rows } = await client.query<{ id: number; created: boolean; reporting_datetime: Date }>(
@@ -77,7 +122,12 @@ export async function saveGeneralReport(req: Request, res: Response) {
         action: rows[0].created ? 'CREATE' : 'UPDATE',
         entityName: 'general_reports',
         entityId: rows[0].id,
-        details: { requisition_id: requisition.id, lab_no: requisition.lab_no },
+        details: {
+          requisition_id: requisition.id,
+          lab_no: requisition.lab_no,
+          reported_by: input.reported_by,
+          authored_by: authoredBy(req.user!),
+        },
       },
       client,
     );
@@ -99,6 +149,7 @@ export async function saveAntibiogramReport(req: Request, res: Response) {
 
   const report = await withTransaction(async (client) => {
     const requisition = await lockEditableRequisition(client, input.requisition_id, 'antibiogram_reports');
+    await assertDoctorAuthorship(client, req.user!, 'antibiogram_reports', input.requisition_id, input.reported_by);
     await assertStaff(client, input.prepared_by, input.reported_by);
 
     const { rows } = await client.query<{ id: number; created: boolean; reporting_datetime: Date }>(
@@ -136,6 +187,8 @@ export async function saveAntibiogramReport(req: Request, res: Response) {
           lab_no: requisition.lab_no,
           organism: input.organism_isolated,
           antibiotics: input.results.length,
+          reported_by: input.reported_by,
+          authored_by: authoredBy(req.user!),
         },
       },
       client,
@@ -213,6 +266,16 @@ export async function listReports(req: Request, res: Response) {
     add((p) => `(r.lab_no ILIKE ${p} OR p.name ILIKE ${p})`, `%${q.search.replace(/[\\%_]/g, '\\$&')}%`);
   }
   if (q.isVerified !== undefined) add((p) => `u.is_verified = ${p}`, q.isVerified);
+
+  // Doctors see only reports naming them as reporting doctor; the HOD and lab staff see the whole department.
+  const { role, staff_id: staffId } = req.user!;
+  if (role === 'DOCTOR') {
+    if (!staffId) {
+      res.json({ success: true, data: { items: [], total: 0, page: q.page, pageSize: q.pageSize } });
+      return;
+    }
+    add((p) => `u.reported_by = ${p}`, staffId);
+  }
 
   const source = q.type
     ? archiveFrom(q.type)

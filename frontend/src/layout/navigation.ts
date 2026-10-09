@@ -4,6 +4,7 @@ import {
   FilePlus2,
   FileText,
   History,
+  IndianRupee,
   LayoutDashboard,
   ListChecks,
   LucideIcon,
@@ -23,6 +24,9 @@ export interface NavItem {
   alsoActiveFor?: string[];
 }
 
+/** Roles allowed into billing; mirrors REVENUE_ROLES on the API. */
+export const REVENUE_ROLES: UserRole[] = ['HOD', 'LAB_TECH'];
+
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: '/', icon: LayoutDashboard, end: true, alsoActiveFor: ['/dashboard'] },
   { label: 'New Requisition', to: '/requisition/new', icon: FilePlus2 },
@@ -34,6 +38,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { label: 'Requisitions', to: '/requisitions', icon: ClipboardList },
   { label: 'Reports', to: '/reports', icon: FileText, end: true },
+  { label: 'Billing & Revenue', to: '/payments', icon: IndianRupee, roles: REVENUE_ROLES },
   { label: 'Verification', to: '/verification', icon: ShieldCheck, roles: ['HOD', 'DOCTOR'] },
   { label: 'Master Data', to: '/master-data', icon: Database, roles: ['HOD'] },
   { label: 'Users', to: '/users', icon: Users, roles: ['HOD'] },

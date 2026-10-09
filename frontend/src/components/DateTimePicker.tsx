@@ -78,7 +78,7 @@ export const DateTimePicker = forwardRef<HTMLButtonElement, DateTimePickerProps>
           variant="outline"
           aria-invalid={invalid || undefined}
           className={cn(
-            'h-9 w-full justify-start px-3 font-normal',
+            'h-9 w-full justify-start rounded-lg border-slate-200 bg-white px-3 font-normal shadow-sm hover:bg-slate-50',
             !selected && 'text-muted-foreground',
             invalid && 'border-destructive',
           )}
@@ -91,7 +91,7 @@ export const DateTimePicker = forwardRef<HTMLButtonElement, DateTimePickerProps>
       <PopoverContent
         align="start"
         collisionPadding={12}
-        className="max-h-[var(--radix-popover-content-available-height)] w-auto overflow-y-auto p-0"
+        className="max-h-[var(--radix-popover-content-available-height)] w-auto overflow-y-auto rounded-2xl p-0"
       >
         <Calendar
           mode="single"

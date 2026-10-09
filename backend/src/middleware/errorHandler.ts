@@ -20,6 +20,7 @@ export function notFoundHandler(req: Request, _res: Response, next: NextFunction
 interface PgError {
   code?: string;
   detail?: string;
+  constraint?: string;
 }
 
 /** Errors raised by body-parser carry an HTTP status and a `type` such as 'entity.parse.failed'. */
@@ -63,6 +64,13 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   }
   if (pgErr?.code === '23503') {
     return res.status(400).json({ success: false, message: 'Referenced record does not exist', ...devOnly(pgErr.detail) });
+  }
+  if (pgErr?.code === '23514') {
+    return res.status(400).json({
+      success: false,
+      message: 'One or more values are not allowed (e.g. amount paid cannot exceed the total)',
+      ...devOnly(pgErr.constraint),
+    });
   }
 
   console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`, err);

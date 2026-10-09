@@ -3,7 +3,9 @@ import { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
+import { AuthUser } from '../../utils/jwt';
 import { assertRequisitionUnlocked } from '../../utils/reportLock';
+import { billingFor, derivePaymentStatus, RELEASED_PAYMENT_STATUSES, UNBILLED, UpdatePaymentInput } from './payment';
 import { CreateRequisitionInput, ListRequisitionsQuery } from './requisition.schema';
 
 type PatientInput = CreateRequisitionInput['patient'];
@@ -60,6 +62,7 @@ export async function createRequisition(req: Request, res: Response) {
   const input = req.body as CreateRequisitionInput;
   const userId = req.user!.sub;
   const hospital = input.hospital === 'Other' ? input.hospital_other : input.hospital;
+  const billing = billingFor(req.user!.role, input) ?? UNBILLED;
 
   try {
     const result = await withTransaction(async (client) => {
@@ -69,13 +72,20 @@ export async function createRequisition(req: Request, res: Response) {
       await assertTestsInCatalog(client, input.requisition_tests);
       const patient = await upsertPatient(client, input.patient);
 
-      const { rows } = await client.query<{ id: number; lab_no: string; status: string; sample_received_datetime: Date }>(
+      const { rows } = await client.query<{
+        id: number;
+        lab_no: string;
+        status: string;
+        payment_status: string;
+        sample_received_datetime: Date;
+      }>(
         `INSERT INTO requisitions (
            lab_no, receipt_no, patient_id, hospital, consultant_doctor, op_ip_no, ward_unit,
            clinical_diagnosis, preferred_antibiotics, antibiotics_used, sample_nature, site_of_collection,
-           sample_collection_datetime, sample_received_datetime, status, created_by
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15)
-         RETURNING id, lab_no, status, sample_received_datetime`,
+           sample_collection_datetime, sample_received_datetime, status, created_by,
+           address, total_amount, paid_amount, payment_status, payment_mode
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15,$16,$17,$18,$19,$20)
+         RETURNING id, lab_no, status, payment_status, sample_received_datetime`,
         [
           input.lab_no,
           input.receipt_no,
@@ -92,6 +102,11 @@ export async function createRequisition(req: Request, res: Response) {
           input.sample_collection_datetime,
           input.sample_received_datetime,
           userId,
+          input.address,
+          billing.total_amount,
+          billing.paid_amount,
+          billing.payment_status,
+          billing.payment_mode,
         ],
       );
       const requisition = rows[0];
@@ -117,6 +132,10 @@ export async function createRequisition(req: Request, res: Response) {
             patient_id: patient.id,
             patient_created: patient.created,
             tests: input.requisition_tests.length,
+            total_amount: billing.total_amount,
+            paid_amount: billing.paid_amount,
+            payment_status: billing.payment_status,
+            payment_mode: billing.payment_mode,
           },
         },
         client,
@@ -148,8 +167,17 @@ const EDITABLE_COLUMNS = [
   'site_of_collection',
   'sample_collection_datetime',
   'sample_received_datetime',
+  'address',
+  'total_amount',
+  'paid_amount',
+  'payment_status',
+  'payment_mode',
 ] as const;
 type EditableColumn = (typeof EDITABLE_COLUMNS)[number];
+
+/** NUMERIC comes back from pg as a string; read amounts as numbers so audit diffs compare like with like. */
+const AMOUNT_COLUMNS: readonly string[] = ['total_amount', 'paid_amount'];
+const selectColumn = (c: string) => (AMOUNT_COLUMNS.includes(c) ? `${c}::float8 AS ${c}` : c);
 
 const comparable = (v: unknown) => (v instanceof Date ? v.toISOString() : (v ?? null));
 
@@ -187,11 +215,12 @@ export async function updateRequisition(req: Request, res: Response) {
   const input = req.body as CreateRequisitionInput;
   const userId = req.user!.sub;
   const hospital = input.hospital === 'Other' ? input.hospital_other : input.hospital;
+  const billing = billingFor(req.user!.role, input);
 
   try {
     const result = await withTransaction(async (client) => {
       const existing = await client.query<Record<EditableColumn, unknown> & { patient_id: number; status: string }>(
-        `SELECT patient_id, status, ${EDITABLE_COLUMNS.join(', ')} FROM requisitions WHERE id = $1 FOR UPDATE`,
+        `SELECT patient_id, status, ${EDITABLE_COLUMNS.map(selectColumn).join(', ')} FROM requisitions WHERE id = $1 FOR UPDATE`,
         [id],
       );
       const before = existing.rows[0];
@@ -218,13 +247,19 @@ export async function updateRequisition(req: Request, res: Response) {
         site_of_collection: input.site_of_collection,
         sample_collection_datetime: input.sample_collection_datetime,
         sample_received_datetime: input.sample_received_datetime,
+        address: input.address,
+        // A doctor's save keeps whatever billing the desk recorded.
+        total_amount: billing ? billing.total_amount : before.total_amount,
+        paid_amount: billing ? billing.paid_amount : before.paid_amount,
+        payment_status: billing ? billing.payment_status : before.payment_status,
+        payment_mode: billing ? billing.payment_mode : before.payment_mode,
       };
 
-      const { rows } = await client.query<{ id: number; lab_no: string; status: string }>(
+      const { rows } = await client.query<{ id: number; lab_no: string; status: string; payment_status: string }>(
         `UPDATE requisitions
          SET ${EDITABLE_COLUMNS.map((c, i) => `${c} = $${i + 3}`).join(', ')}, patient_id = $2
          WHERE id = $1
-         RETURNING id, lab_no, status`,
+         RETURNING id, lab_no, status, payment_status`,
         [id, patient.id, ...EDITABLE_COLUMNS.map((c) => after[c])],
       );
 
@@ -284,6 +319,8 @@ export const REQUISITION_SELECT = `
          r.op_ip_no, r.ward_unit, r.clinical_diagnosis, r.preferred_antibiotics, r.antibiotics_used,
          r.sample_nature, r.site_of_collection,
          r.sample_collection_datetime, r.sample_received_datetime, r.created_at,
+         r.address, r.total_amount::float8 AS total_amount, r.paid_amount::float8 AS paid_amount,
+         r.payment_status, r.payment_mode,
          json_build_object(
            'id', p.id, 'name', p.name, 'age_value', p.age_value,
            'age_unit', p.age_unit, 'age_years', p.age_years, 'age_months', p.age_months,
@@ -312,9 +349,76 @@ export async function listPendingRequisitions(_req: Request, res: Response) {
   const { rows } = await query(
     `${REQUISITION_SELECT}
      WHERE r.status IN ('RECEIVED', 'REPORT_ENTERED')
+       AND r.payment_status = ANY($1::text[])
      ORDER BY r.sample_received_datetime DESC, r.id DESC`,
+    [RELEASED_PAYMENT_STATUSES],
   );
   res.json({ success: true, data: rows });
+}
+
+/**
+ * Settles or corrects billing. Deliberately not blocked by the report lock: a bill can be
+ * paid after the reports are verified without reopening any clinical data.
+ */
+export async function updatePayment(req: Request, res: Response) {
+  const id = Number(req.params.id);
+  const input = req.body as UpdatePaymentInput;
+  const paymentStatus = derivePaymentStatus(input.total_amount, input.paid_amount, input.payment_mode);
+
+  const result = await withTransaction(async (client) => {
+    const existing = await client.query<{
+      lab_no: string;
+      total_amount: number;
+      paid_amount: number;
+      payment_status: string;
+      payment_mode: string | null;
+    }>(
+      `SELECT lab_no, total_amount::float8 AS total_amount, paid_amount::float8 AS paid_amount, payment_status, payment_mode
+       FROM requisitions WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const before = existing.rows[0];
+    if (!before) throw new AppError(404, 'Requisition not found');
+
+    const after = {
+      total_amount: input.total_amount,
+      paid_amount: input.paid_amount,
+      payment_status: paymentStatus,
+      payment_mode: input.payment_mode,
+    };
+    const changes = Object.fromEntries(
+      (Object.keys(after) as (keyof typeof after)[])
+        .filter((k) => (before[k] ?? null) !== (after[k] ?? null))
+        .map((k) => [k, { from: before[k] ?? null, to: after[k] ?? null }]),
+    );
+    if (Object.keys(changes).length === 0) {
+      return { id, lab_no: before.lab_no, ...after, changed: false };
+    }
+
+    await client.query(
+      `UPDATE requisitions
+       SET total_amount = $2, paid_amount = $3, payment_status = $4, payment_mode = $5
+       WHERE id = $1`,
+      [id, after.total_amount, after.paid_amount, after.payment_status, after.payment_mode],
+    );
+    await writeAuditLog(
+      {
+        userId: req.user!.sub,
+        action: 'PAYMENT_UPDATE',
+        entityName: 'requisitions',
+        entityId: id,
+        details: { lab_no: before.lab_no, changes },
+      },
+      client,
+    );
+    return { id, lab_no: before.lab_no, ...after, changed: true };
+  });
+
+  res.json({
+    success: true,
+    message: result.changed ? `Payment updated for ${result.lab_no}` : 'No payment changes to save',
+    data: result,
+  });
 }
 
 export async function listRequisitions(req: Request, res: Response) {
@@ -334,6 +438,7 @@ export async function listRequisitions(req: Request, res: Response) {
   }
   if (q.fromDate) add((p) => `r.sample_received_datetime >= ${p}::date`, q.fromDate);
   if (q.toDate) add((p) => `r.sample_received_datetime < ${p}::date + 1`, q.toDate);
+  if (q.paymentStatus) add((p) => `r.payment_status = ${p}`, q.paymentStatus);
 
   // Status counts ignore the status filter so the dropdown can show how many match each option.
   const baseWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -369,6 +474,8 @@ export async function listRequisitions(req: Request, res: Response) {
   });
 }
 
+type ReportRow = { reported_by: number | null; [column: string]: unknown };
+
 export async function getRequisition(req: Request, res: Response) {
   const id = Number(req.params.id);
   const { rows } = await query(`${REQUISITION_SELECT} WHERE r.id = $1`, [id]);
@@ -376,13 +483,13 @@ export async function getRequisition(req: Request, res: Response) {
   if (!requisition) throw new AppError(404, 'Requisition not found');
 
   const [general, antibiogram] = await Promise.all([
-    query(
+    query<ReportRow>(
       `SELECT id, reporting_datetime, specimen, investigation_done, report_findings,
               prepared_by, reported_by, is_verified, updated_at
        FROM general_reports WHERE requisition_id = $1`,
       [id],
     ),
-    query(
+    query<ReportRow>(
       `SELECT a.id, a.reporting_datetime, a.organism_isolated, a.grams_stain_remark,
               a.prepared_by, a.reported_by, a.is_verified, a.updated_at,
               COALESCE(
@@ -398,8 +505,48 @@ export async function getRequisition(req: Request, res: Response) {
     ),
   ]);
 
+  const generalReport = general.rows[0] ?? null;
+  const antibiogramReport = antibiogram.rows[0] ?? null;
+  await assertDoctorCanView(req.user!, requisition.consultant_doctor, [generalReport, antibiogramReport]);
+
   res.json({
     success: true,
-    data: { ...requisition, general_report: general.rows[0] ?? null, antibiogram_report: antibiogram.rows[0] ?? null },
+    data: { ...requisition, general_report: generalReport, antibiogram_report: antibiogramReport },
   });
+}
+
+/** Name tokens without titles/initials, e.g. "Dr.Basavaraj..K.N." -> ["basavaraj"]. */
+const nameTokens = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/^\s*dr\b\.?/, '')
+    .split(/[^a-z]+/)
+    .filter((t) => t.length >= 3);
+
+/** True when the free-text consultant name refers to this staff member (initials and punctuation ignored). */
+function isSameDoctor(consultant: string, staffName: string) {
+  const consultantTokens = new Set(nameTokens(consultant));
+  const staffTokens = nameTokens(staffName);
+  return staffTokens.length > 0 && staffTokens.every((t) => consultantTokens.has(t));
+}
+
+/**
+ * Doctors may open a requisition when they are its consultant, when one of its reports names
+ * them as reporting doctor, or while no report exists yet (so they can author the first one).
+ */
+async function assertDoctorCanView(
+  user: AuthUser,
+  consultant: string | null,
+  reports: ({ reported_by: number | null } | null)[],
+) {
+  if (user.role !== 'DOCTOR') return;
+  const existing = reports.filter((r): r is { reported_by: number | null } => r !== null);
+  if (existing.length === 0) return;
+  if (user.staff_id && existing.some((r) => r.reported_by === user.staff_id)) return;
+
+  if (user.staff_id && consultant) {
+    const { rows } = await query<{ name: string }>('SELECT name FROM master_staff WHERE id = $1', [user.staff_id]);
+    if (rows[0] && isSameDoctor(consultant, rows[0].name)) return;
+  }
+  throw new AppError(403, 'You can only open requisitions for your own patients or reports assigned to you');
 }

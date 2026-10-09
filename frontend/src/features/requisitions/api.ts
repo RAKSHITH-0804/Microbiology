@@ -4,10 +4,12 @@ import type {
   CreateRequisitionPayload,
   DashboardStats,
   MasterSample,
+  PaymentPayload,
   PendingRequisition,
   RequisitionListPage,
   RequisitionListParams,
   TestCategory,
+  UpdatedPayment,
   UpdatedRequisition,
 } from '@/types/requisition';
 
@@ -28,6 +30,11 @@ export async function createRequisition(payload: CreateRequisitionPayload): Prom
 
 export async function updateRequisition(id: number, payload: CreateRequisitionPayload): Promise<UpdatedRequisition> {
   const res = await api.put<ApiResponse<UpdatedRequisition>>(`/requisitions/${id}`, payload);
+  return res.data.data;
+}
+
+export async function updatePayment(id: number, payload: PaymentPayload): Promise<UpdatedPayment> {
+  const res = await api.patch<ApiResponse<UpdatedPayment>>(`/requisitions/${id}/payment`, payload);
   return res.data.data;
 }
 

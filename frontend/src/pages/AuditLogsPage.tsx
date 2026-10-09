@@ -4,6 +4,7 @@ import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/DatePicker';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { fetchAuditLogs } from '@/features/admin/api';
@@ -186,11 +187,11 @@ export default function AuditLogsPage() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="audit_from" className="text-xs">From</Label>
-              <Input id="audit_from" type="date" max={toDate || today} value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+              <DatePicker id="audit_from" className="md:w-40" clearable max={toDate || today} value={fromDate} onChange={setFromDate} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="audit_to" className="text-xs">To</Label>
-              <Input id="audit_to" type="date" min={fromDate} max={today} value={toDate} onChange={(e) => setToDate(e.target.value)} />
+              <DatePicker id="audit_to" className="md:w-40" clearable min={fromDate || undefined} max={today} value={toDate} onChange={setToDate} />
             </div>
             <Button variant="ghost" onClick={clearFilters} disabled={!hasFilters}>
               <X /> Clear

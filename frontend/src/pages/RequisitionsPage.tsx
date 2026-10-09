@@ -11,6 +11,7 @@ import {
   Lock,
   Microscope,
   Pencil,
+  ReceiptIndianRupee,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -19,17 +20,30 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/DatePicker';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { StatusPill } from '@/components/reports/StatusPill';
+import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
+import { UpdatePaymentDialog } from '@/components/requisitions/UpdatePaymentDialog';
 import { TablePagination } from '@/components/TablePagination';
 import { fetchRequisitions } from '@/features/requisitions/api';
+import { formatRupees, PAYMENT_STATUS_META, paymentModeLabel } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
 import { formatAge, formatDateTime, formatSex } from '@/lib/format';
 import { useFilterParams } from '@/lib/useFilterParams';
+import { useAuth } from '@/context/AuthContext';
+import { REVENUE_ROLES } from '@/layout/navigation';
 import { cn } from '@/lib/utils';
-import type { PendingRequisition, RequisitionListPage, RequisitionStatus } from '@/types/requisition';
+import {
+  PAYMENT_STATUSES,
+  type PaymentStatus,
+  type PaymentTarget,
+  type PendingRequisition,
+  type RequisitionListPage,
+  type RequisitionStatus,
+} from '@/types/requisition';
 
 const PAGE_SIZE = 25;
 
@@ -40,6 +54,7 @@ const STATUS_OPTIONS: { value: RequisitionStatus; label: string }[] = [
 ];
 
 const isStatus = (v: string | null): v is RequisitionStatus => STATUS_OPTIONS.some((o) => o.value === v);
+const isPaymentStatus = (v: string | null): v is PaymentStatus => (PAYMENT_STATUSES as readonly (string | null)[]).includes(v);
 const isDate = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 const isLocked = (r: PendingRequisition) =>
@@ -114,12 +129,17 @@ export default function RequisitionsPage() {
   const { params, search, setSearch, urlSearch, page, update: updateParams, clear: clearFilters } = useFilterParams();
   const statusParam = params.get('status');
   const status = isStatus(statusParam) ? statusParam : '';
+  const paymentParam = params.get('paymentStatus');
+  const paymentStatus = isPaymentStatus(paymentParam) ? paymentParam : '';
   const fromDate = isDate(params.get('fromDate')) ? params.get('fromDate')! : '';
   const toDate = isDate(params.get('toDate')) ? params.get('toDate')! : '';
 
   const [data, setData] = useState<RequisitionListPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
+  const { user } = useAuth();
+  const canManagePayments = !!user && REVENUE_ROLES.includes(user.role);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -129,6 +149,7 @@ export default function RequisitionsPage() {
         await fetchRequisitions({
           search: urlSearch || undefined,
           status: status || undefined,
+          paymentStatus: paymentStatus || undefined,
           fromDate: fromDate || undefined,
           toDate: toDate || undefined,
           page,
@@ -140,13 +161,13 @@ export default function RequisitionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [urlSearch, status, fromDate, toDate, page]);
+  }, [urlSearch, status, paymentStatus, fromDate, toDate, page]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const hasFilters = !!(search || status || fromDate || toDate);
+  const hasFilters = !!(search || status || paymentStatus || fromDate || toDate);
   const today = new Date().toLocaleDateString('en-CA');
   const counts = data?.statusCounts;
   const allCount = counts ? counts.RECEIVED + counts.REPORT_ENTERED + counts.VERIFIED : null;
@@ -173,7 +194,7 @@ export default function RequisitionsPage() {
 
       <Card>
         <CardContent className="p-0">
-          <div className="grid gap-3 border-b px-4 py-3 sm:grid-cols-2 sm:items-end lg:grid-cols-[minmax(14rem,1fr)_auto_auto_auto_auto]">
+          <div className="grid gap-3 border-b px-4 py-3 sm:grid-cols-2 sm:items-end lg:grid-cols-[minmax(14rem,1fr)_auto_auto_auto_auto_auto]">
             <div className="space-y-1">
               <Label htmlFor="req_search" className="text-xs">Search</Label>
               <div className="relative">
@@ -205,24 +226,40 @@ export default function RequisitionsPage() {
               </NativeSelect>
             </div>
             <div className="space-y-1">
+              <Label htmlFor="req_payment" className="text-xs">Payment</Label>
+              <NativeSelect
+                id="req_payment"
+                value={paymentStatus}
+                onChange={(e) => updateParams({ paymentStatus: e.target.value })}
+                className="lg:w-36"
+              >
+                <option value="">All Payments</option>
+                {PAYMENT_STATUSES.map((s) => (
+                  <option key={s} value={s}>{PAYMENT_STATUS_META[s].label}</option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-1">
               <Label htmlFor="req_from" className="text-xs">Received from</Label>
-              <Input
+              <DatePicker
                 id="req_from"
-                type="date"
+                className="lg:w-40"
+                clearable
                 max={toDate || today}
                 value={fromDate}
-                onChange={(e) => updateParams({ fromDate: e.target.value })}
+                onChange={(d) => updateParams({ fromDate: d })}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="req_to" className="text-xs">Received to</Label>
-              <Input
+              <DatePicker
                 id="req_to"
-                type="date"
-                min={fromDate}
+                className="lg:w-40"
+                clearable
+                min={fromDate || undefined}
                 max={today}
                 value={toDate}
-                onChange={(e) => updateParams({ toDate: e.target.value })}
+                onChange={(d) => updateParams({ toDate: d })}
               />
             </div>
             <Button variant="ghost" onClick={clearFilters} disabled={!hasFilters}>
@@ -238,7 +275,7 @@ export default function RequisitionsPage() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1080px] text-sm">
+            <table className="w-full min-w-[1280px] text-sm">
               <thead>
                 <tr className="border-b bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-2.5">Lab No</th>
@@ -248,20 +285,21 @@ export default function RequisitionsPage() {
                   <th className="px-4 py-2.5">Sample Nature</th>
                   <th className="px-4 py-2.5">Received On</th>
                   <th className="px-4 py-2.5">Status</th>
+                  <th className="px-4 py-2.5">Payment</th>
                   <th className="px-4 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className={cn('divide-y', loading && data && 'opacity-60')}>
                 {loading && !data && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
                       <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading requisitions...
                     </td>
                   </tr>
                 )}
                 {data && data.items.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                       <Inbox className="mx-auto mb-2 h-8 w-8 text-slate-300" />
                       {hasFilters ? 'No requisitions match these filters.' : 'No requisitions registered yet.'}
                     </td>
@@ -285,8 +323,27 @@ export default function RequisitionsPage() {
                       <td className="px-4 py-3">
                         <StatusPill status={r.status} />
                       </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <PaymentStatusBadge status={r.payment_status} />
+                        {r.payment_status !== 'EXEMPT' && r.total_amount > 0 && (
+                          <p className="mt-1 text-xs tabular-nums text-slate-500">
+                            {formatRupees(r.paid_amount)} / {formatRupees(r.total_amount)}
+                          </p>
+                        )}
+                        {r.payment_mode && <p className="text-xs text-slate-400">{paymentModeLabel(r.payment_mode)}</p>}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
+                          {canManagePayments && (
+                            <Button
+                              size="sm"
+                              variant={r.payment_status === 'PARTIAL' || r.payment_status === 'UNPAID' ? 'default' : 'outline'}
+                              title="Record or correct the payment"
+                              onClick={() => setPaymentTarget({ ...r, patient_name: r.patient.name })}
+                            >
+                              <ReceiptIndianRupee /> Payment
+                            </Button>
+                          )}
                           {locked ? (
                             <span title="Verified requisitions are locked and cannot be edited">
                               <Button size="sm" variant="outline" disabled>
@@ -321,6 +378,8 @@ export default function RequisitionsPage() {
           )}
         </CardContent>
       </Card>
+
+      <UpdatePaymentDialog requisition={paymentTarget} onClose={() => setPaymentTarget(null)} onSaved={load} />
     </div>
   );
 }

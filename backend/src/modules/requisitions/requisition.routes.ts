@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, requireRevenueAccess } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
@@ -8,8 +8,10 @@ import {
   getRequisition,
   listPendingRequisitions,
   listRequisitions,
+  updatePayment,
   updateRequisition,
 } from './requisition.controller';
+import { updatePaymentSchema } from './payment';
 import { createRequisitionSchema, listRequisitionsQuery } from './requisition.schema';
 
 const router = Router();
@@ -22,5 +24,6 @@ router.get('/pending', asyncHandler(listPendingRequisitions));
 router.get('/:id', validate({ params: idParams }), asyncHandler(getRequisition));
 router.post('/', validate({ body: createRequisitionSchema }), asyncHandler(createRequisition));
 router.put('/:id', validate({ params: idParams, body: createRequisitionSchema }), asyncHandler(updateRequisition));
+router.patch('/:id/payment', requireRevenueAccess, validate({ params: idParams, body: updatePaymentSchema }), asyncHandler(updatePayment));
 
 export default router;

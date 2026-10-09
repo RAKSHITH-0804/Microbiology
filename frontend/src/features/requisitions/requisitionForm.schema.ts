@@ -2,6 +2,7 @@ import type { FieldPath } from 'react-hook-form';
 import { z } from 'zod';
 import { dateTimeLocalToIso, toDateTimeLocal } from '@/lib/datetime';
 import { HOSPITALS, type CreateRequisitionPayload, type Hospital, type PendingRequisition } from '@/types/requisition';
+import { checkPaymentForm, computePayment, paymentFormFields, paymentFormFrom } from './payment';
 
 const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 const TEST_KEY_SEPARATOR = '||';
@@ -18,7 +19,7 @@ const agePart = (max: number, label: string) =>
     .refine((v) => v === '' || /^\d{1,3}$/.test(v), `${label} must be a whole number`)
     .refine((v) => v === '' || Number(v) <= max, `${label} must be at most ${max}`);
 
-export const requisitionFormSchema = z
+const requisitionFormFields = z
   .object({
     lab_no: text(50).min(1, 'Lab No. is required'),
     receipt_no: text(50),
@@ -40,6 +41,7 @@ export const requisitionFormSchema = z
       .string()
       .trim()
       .refine((v) => v === '' || /^\d{10}$/.test(v), 'Phone number must be exactly 10 digits'),
+    address: text(500),
     consultant_doctor: text(150),
     op_ip_no: text(50),
     ward_unit: text(100),
@@ -54,8 +56,15 @@ export const requisitionFormSchema = z
     sample_collection_datetime: z.string(),
 
     tests: z.array(z.string()).min(1, 'Select at least one investigation'),
-  })
-  .superRefine((v, ctx) => {
+
+    ...paymentFormFields,
+  });
+
+/** Billing is only validated for staff who see the Billing & Payment card (not doctors). */
+export const buildRequisitionFormSchema = (withBilling: boolean) =>
+  requisitionFormFields.superRefine((v, ctx) => {
+    if (withBilling) checkPaymentForm(v, ctx);
+
     if (v.hospital === 'Other' && !v.hospital_other) {
       ctx.addIssue({ code: 'custom', path: ['hospital_other'], message: 'Specify the hospital name' });
     }
@@ -66,7 +75,7 @@ export const requisitionFormSchema = z
     }
   });
 
-export type RequisitionFormValues = z.infer<typeof requisitionFormSchema>;
+export type RequisitionFormValues = z.infer<typeof requisitionFormFields>;
 
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
 const numberOrNull = (v: string) => (v.trim() ? Number(v) : null);
@@ -92,6 +101,8 @@ export function toCreatePayload(v: RequisitionFormValues): CreateRequisitionPayl
       sex: v.sex as CreateRequisitionPayload['patient']['sex'],
       phone: orNull(v.phone),
     },
+    address: orNull(v.address),
+    ...computePayment(v),
     lab_no: v.lab_no.trim(),
     receipt_no: orNull(v.receipt_no),
     hospital: v.hospital as Hospital,
@@ -136,6 +147,7 @@ export function fromRequisition(r: PendingRequisition): RequisitionFormValues {
     age,
     sex: p.sex ?? '',
     phone: p.phone ?? '',
+    address: r.address ?? '',
     consultant_doctor: r.consultant_doctor ?? '',
     op_ip_no: r.op_ip_no ?? '',
     ward_unit: r.ward_unit ?? '',
@@ -148,6 +160,7 @@ export function fromRequisition(r: PendingRequisition): RequisitionFormValues {
     site_of_collection: r.site_of_collection ?? '',
     sample_collection_datetime: localDateTime(r.sample_collection_datetime),
     tests: r.tests.map((t) => testKey(t.test_category, t.test_name)),
+    ...paymentFormFrom(r),
   };
 }
 

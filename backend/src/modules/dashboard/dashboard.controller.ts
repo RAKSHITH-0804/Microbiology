@@ -14,7 +14,7 @@ export async function getDashboardStats(_req: Request, res: Response) {
     query<CountsRow>(
       `SELECT
          (SELECT COUNT(*) FROM requisitions WHERE created_at >= date_trunc('day', NOW())) AS samples_today,
-         (SELECT COUNT(*) FROM requisitions WHERE status = 'RECEIVED') AS pending_reports,
+         (SELECT COUNT(*) FROM requisitions WHERE status = 'RECEIVED' AND payment_status IN ('PAID', 'EXEMPT')) AS pending_reports,
          (SELECT COUNT(*) FROM requisitions WHERE status = 'REPORT_ENTERED') AS awaiting_verification,
          (SELECT COUNT(*)
           FROM requisitions r

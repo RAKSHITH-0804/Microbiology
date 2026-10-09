@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PAYMENT_STATUSES, paymentFields } from './payment';
 
 export const HOSPITALS = ['CGH', 'BH', 'PVT', 'WCH', 'Other'] as const;
 
@@ -57,6 +58,7 @@ export const createRequisitionSchema = z
     patient: patientSchema,
     lab_no: z.string().trim().min(1, 'Lab No is required').max(50),
     receipt_no: optionalText(50),
+    address: optionalText(500),
     hospital: z.enum(HOSPITALS, { errorMap: () => ({ message: 'Select a hospital' }) }),
     hospital_other: optionalText(150),
     consultant_doctor: optionalText(150).transform((v) => {
@@ -80,6 +82,8 @@ export const createRequisitionSchema = z
         (tests) => new Set(tests.map((t) => `${t.test_category}|${t.test_name}`)).size === tests.length,
         'Duplicate investigations selected',
       ),
+    // Billing rules are role-dependent, so they are enforced by billingFor() in the controller.
+    ...paymentFields,
   })
   .superRefine((data, ctx) => {
     if (data.hospital === 'Other' && !data.hospital_other) {
@@ -103,6 +107,7 @@ export const listRequisitionsQuery = z
   .object({
     search: z.string().trim().max(100).optional(),
     status: z.enum(REQUISITION_STATUSES).optional(),
+    paymentStatus: z.enum(PAYMENT_STATUSES).optional(),
     fromDate: isoDate.optional(),
     toDate: isoDate.optional(),
     page: z.coerce.number().int().min(1).default(1),

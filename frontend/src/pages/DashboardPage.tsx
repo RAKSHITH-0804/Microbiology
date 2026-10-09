@@ -44,7 +44,7 @@ const KPIS: KpiCard[] = [
   {
     key: 'pendingReports',
     label: 'Pending Reports',
-    hint: 'Received, no report entered yet',
+    hint: 'Paid & received, no report entered yet',
     icon: ClipboardList,
     tone: 'bg-amber-50 text-amber-600',
     to: '/requisitions?status=RECEIVED',

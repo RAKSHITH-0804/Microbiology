@@ -64,11 +64,21 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
 }
 
 export function requireRole(...roles: UserRole[]) {
+  return restrictTo(roles);
+}
+
+/** Like requireRole, with a domain-specific 403 message. */
+export function restrictTo(roles: readonly UserRole[], message = 'You do not have permission to perform this action') {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) return next(new AppError(401, 'Authentication required'));
-    if (!roles.includes(req.user.role)) {
-      return next(new AppError(403, 'You do not have permission to perform this action'));
-    }
+    if (!roles.includes(req.user.role)) return next(new AppError(403, message));
     return next();
   };
 }
+
+/** Billing data (collections, dues, patient ledgers) is for the HOD and desk staff, not reporting doctors. */
+export const REVENUE_ROLES: readonly UserRole[] = ['HOD', 'LAB_TECH'];
+export const requireRevenueAccess = restrictTo(
+  REVENUE_ROLES,
+  'Access Denied: Revenue module is restricted to administrative and desk staff',
+);

@@ -16,8 +16,9 @@ const router = Router();
 router.use(requireAuth);
 router.get('/', validate({ query: listReportsQuery }), asyncHandler(listReports));
 router.get('/unverified', requireRole('DOCTOR', 'HOD'), asyncHandler(listUnverifiedReports));
-router.post('/general', validate({ body: generalReportSchema }), asyncHandler(saveGeneralReport));
-router.post('/antibiogram', validate({ body: antibiogramReportSchema }), asyncHandler(saveAntibiogramReport));
+const reportAuthors = requireRole('LAB_TECH', 'DOCTOR', 'HOD');
+router.post('/general', reportAuthors, validate({ body: generalReportSchema }), asyncHandler(saveGeneralReport));
+router.post('/antibiogram', reportAuthors, validate({ body: antibiogramReportSchema }), asyncHandler(saveAntibiogramReport));
 router.post(
   '/:type/:id/verify',
   requireRole('DOCTOR', 'HOD'),

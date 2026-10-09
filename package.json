@@ -16,7 +16,8 @@
     "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
     "db:migrate": "npm run migrate -w database",
     "db:seed": "npm run seed -w database",
-    "db:setup": "npm run db:migrate && npm run db:seed"
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "db:reset": "node database/reset.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

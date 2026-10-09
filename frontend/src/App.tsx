@@ -20,12 +20,14 @@ import AuditLogsPage from '@/pages/AuditLogsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import RequisitionsPage from '@/pages/RequisitionsPage';
 import ReportsPage from '@/pages/ReportsPage';
+import PaymentsPage from '@/pages/PaymentsPage';
 
 const PAGES: Record<string, ReactElement> = {
   '/requisition/new': <RequisitionFormPage />,
   '/worklist': <PendingQueuePage />,
   '/requisitions': <RequisitionsPage />,
   '/reports': <ReportsPage />,
+  '/payments': <PaymentsPage />,
   '/verification': <VerificationPage />,
   '/master-data': <MasterDataPage />,
   '/users': <UsersPage />,
