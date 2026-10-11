@@ -5,8 +5,9 @@ import { SettingsProvider } from '@/context/SettingsContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Toaster } from '@/components/ui/sonner';
 import AppLayout from '@/layout/AppLayout';
-import { NAV_ITEMS, REQUISITION_EDIT_ROLES, REQUISITION_ENTRY_DENIED } from '@/layout/navigation';
+import { CHANGE_PASSWORD_PATH, NAV_ITEMS, REQUISITION_EDIT_ROLES, REQUISITION_ENTRY_DENIED } from '@/layout/navigation';
 import LoginPage from '@/pages/LoginPage';
+import ChangePasswordPage from '@/pages/ChangePasswordPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ComingSoonPage from '@/pages/ComingSoonPage';
 import RequisitionFormPage from '@/pages/RequisitionFormPage';
@@ -47,6 +48,7 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
 
             <Route element={<ProtectedRoute />}>
+              <Route path={CHANGE_PASSWORD_PATH.slice(1)} element={<ChangePasswordPage />} />
               <Route element={<AppLayout />}>
                 <Route index element={<DashboardPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />

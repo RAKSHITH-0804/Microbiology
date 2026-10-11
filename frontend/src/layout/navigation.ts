@@ -48,6 +48,9 @@ export const REPORT_AUTHOR_ROLES: UserRole[] = ['HOD', 'LAB_TECH', 'DOCTOR'];
 
 export const MODULE_DISABLED_MESSAGE = 'Module access disabled by Super Admin';
 
+/** Compulsory screen for accounts still on an initial or temporary password; every other page redirects here. */
+export const CHANGE_PASSWORD_PATH = '/change-password';
+
 const SUPER_ADMIN_ONLY: UserRole[] = ['SUPER_ADMIN'];
 const SUPER_ADMIN_DENIED = 'Access restricted: This module is managed by the Super Admin.';
 

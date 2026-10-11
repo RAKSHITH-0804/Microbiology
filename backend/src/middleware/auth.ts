@@ -20,6 +20,9 @@ export const MODULE_DISABLED = 'MODULE_DISABLED';
 export const DISABLED_MODULES_SQL = (userIdSql: string) =>
   `ARRAY(SELECT p.module_key::text FROM user_permissions p WHERE p.user_id = ${userIdSql} AND NOT p.is_enabled ORDER BY p.module_key) AS disabled_modules`;
 
+/** The Super Admin signs in with fixed credentials and is never sent to the first-login password change. */
+export const mustChangePasswordFor = (role: UserRole, flag: boolean) => role !== 'SUPER_ADMIN' && flag;
+
 /** Authenticates the request and blocks accounts that still have to replace their temporary password. */
 export const requireAuth = (req: Request, res: Response, next: NextFunction) => authenticate(req, res, next, true);
 
@@ -60,7 +63,8 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
     if (user.password_changed_at && (payload.iat ?? 0) < Math.floor(user.password_changed_at.getTime() / 1000)) {
       return next(new AppError(401, 'Your password was changed. Please log in again.'));
     }
-    if (enforcePasswordChange && user.must_change_password) {
+    const mustChangePassword = mustChangePasswordFor(user.role, user.must_change_password);
+    if (enforcePasswordChange && mustChangePassword) {
       return next(
         new AppError(403, 'You must change your temporary password before continuing.', { code: PASSWORD_CHANGE_REQUIRED }),
       );
@@ -69,7 +73,7 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
       ...payload,
       role: user.role,
       staff_id: user.staff_id,
-      must_change_password: user.must_change_password,
+      must_change_password: mustChangePassword,
       disabled_modules: user.role === 'SUPER_ADMIN' ? [] : user.disabled_modules,
     };
     return next();

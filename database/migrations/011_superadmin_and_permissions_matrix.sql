@@ -22,7 +22,4 @@ CREATE TABLE user_permissions (
   ))
 );
 
--- Default system administrator. Password "admin123" (bcrypt); it must be changed at first login.
-INSERT INTO users (username, password_hash, role, must_change_password)
-SELECT 'superadmin', '$2a$10$oIQ9mCu9u1r07QDzY3FU.eFgC3U..Vd.ypeqFsSsv0xrgMWbIk1Ha', 'SUPER_ADMIN', TRUE
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE LOWER(username) = 'superadmin');
+-- The "superadmin" account is created by the seeder from SUPERADMIN_DEFAULT_PASSWORD; no credentials live in SQL.

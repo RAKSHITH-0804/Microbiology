@@ -1,8 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Lock, LogOut, Menu, Microscope, Settings, X } from 'lucide-react';
-import { ForcePasswordChangeDialog } from '@/components/auth/ForcePasswordChangeDialog';
+import { LogOut, Menu, Microscope, Settings, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
 import { ROLE_LABELS } from '@/types/auth';
@@ -20,8 +19,6 @@ export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const items = NAV_ITEMS.filter((item) => canSeeNavItem(user, item));
-
-  const mustChangePassword = !!user?.mustChangePassword;
 
   const handleLogout = async () => {
     await logout();
@@ -120,16 +117,8 @@ export default function AppLayout() {
         </header>
 
         <main className="relative flex-1 scroll-pb-24 overflow-y-auto p-6 print:overflow-visible print:p-0">
-          {mustChangePassword ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-slate-500">
-              <Lock className="h-8 w-8 text-slate-400" />
-              <p className="text-sm">Set a new password to unlock the portal.</p>
-            </div>
-          ) : (
-            <Outlet />
-          )}
+          <Outlet />
         </main>
-        {mustChangePassword && <ForcePasswordChangeDialog onSignOut={handleLogout} />}
       </div>
     </div>
   );

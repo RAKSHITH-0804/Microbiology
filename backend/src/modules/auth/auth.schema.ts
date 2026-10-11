@@ -18,5 +18,11 @@ export const changePasswordSchema = z
     message: 'New password must be different from the current one',
   });
 
+/** Username, or the numeric staff ID the account is linked to. */
+export const forgotPasswordSchema = z.object({
+  username: z.string().trim().min(1, 'Enter your username or staff ID').max(50),
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;

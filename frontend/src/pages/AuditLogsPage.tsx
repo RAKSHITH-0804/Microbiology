@@ -30,6 +30,9 @@ const ACTION_TONE: Record<string, BadgeProps['tone']> = {
   VERIFIED_PAYMENT_OVERRIDE: 'red',
   REVENUE_EXPORT: 'violet',
   PERMISSION_UPDATE: 'violet',
+  PASSWORD_CHANGE: 'slate',
+  PASSWORD_RESET_REQUESTED: 'amber',
+  PASSWORD_RESET: 'violet',
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -65,6 +68,12 @@ function describe(e: AuditLogEntry): string {
       const staff = typeof d.staff_name === 'string' ? ` (${d.staff_name})` : '';
       return `Deleted user account "${String(d.username ?? '')}"${staff}${d.staff_deleted ? ' and its staff record' : ''}`;
     }
+    case 'PASSWORD_CHANGE:users':
+      return d.first_login ? 'Replaced the initial / temporary password' : 'Changed own password';
+    case 'PASSWORD_RESET_REQUESTED:users':
+      return `Requested a password reset for "${String(d.username ?? '')}" from the login page`;
+    case 'PASSWORD_RESET:users':
+      return `Issued a temporary password for "${String(d.username ?? '')}"${d.requested_by_user ? ' (answering a reset request)' : ''}`;
     case 'CREATE:requisitions':
       return `Registered requisition${lab}`;
     case 'UPDATE:requisitions': {

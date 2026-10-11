@@ -4,7 +4,7 @@ import { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
-import { CreateUserInput, UserStatusInput } from './user.schema';
+import { CreateUserInput, DEFAULT_STAFF_PASSWORD, ResetPasswordInput, UserStatusInput } from './user.schema';
 
 const BCRYPT_ROUNDS = 10;
 
@@ -19,6 +19,7 @@ const HAS_CLINICAL_RECORDS = `(
 
 const USER_SELECT = `
   SELECT u.id, u.username, u.role, u.is_active, u.staff_id, u.created_at, u.updated_at,
+         u.must_change_password, u.password_reset_requested, u.password_reset_requested_at,
          s.name AS staff_name, s.designation, s.staff_type,
          (SELECT MAX(a.created_at) FROM audit_logs a WHERE a.user_id = u.id AND a.action = 'LOGIN') AS last_login_at,
          ${HAS_CLINICAL_RECORDS} AS has_clinical_records
@@ -41,9 +42,10 @@ export async function createUser(req: Request, res: Response) {
 
     const staffId = isNewStaff ? await insertStaff(client, req.user!.sub, input) : await assertStaffUnlinked(client, input.staff_id!);
 
-    const hash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
+    const hash = await bcrypt.hash(input.password ?? DEFAULT_STAFF_PASSWORD, BCRYPT_ROUNDS);
     const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO users (username, password_hash, role, staff_id) VALUES ($1, $2, $3, $4) RETURNING id`,
+      `INSERT INTO users (username, password_hash, role, staff_id, must_change_password)
+       VALUES ($1, $2, $3, $4, TRUE) RETURNING id`,
       [input.username, hash, input.role, staffId],
     );
     const id = rows[0].id;
@@ -54,7 +56,13 @@ export async function createUser(req: Request, res: Response) {
         action: 'CREATE',
         entityName: 'users',
         entityId: id,
-        details: { username: input.username, role: input.role, staff_id: staffId, new_staff: isNewStaff },
+        details: {
+          username: input.username,
+          role: input.role,
+          staff_id: staffId,
+          new_staff: isNewStaff,
+          default_password: input.password === undefined,
+        },
       },
       client,
     );
@@ -163,6 +171,48 @@ export async function setUserStatus(req: Request, res: Response) {
     message: `${user.username} ${is_active ? 'activated' : 'deactivated'}`,
     data: user,
   });
+}
+
+/**
+ * Issues a temporary password, typically answering a "Forgot Password?" request. The user must replace it
+ * at the next sign-in, and sessions opened with the old password end immediately.
+ */
+export async function resetUserPassword(req: Request, res: Response) {
+  const id = Number(req.params.id);
+  const { password } = req.body as ResetPasswordInput;
+  const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+  const user = await withTransaction(async (client) => {
+    const { rows } = await client.query<{ username: string; role: string; password_reset_requested: boolean }>(
+      'SELECT username, role, password_reset_requested FROM users WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    const target = rows[0];
+    if (!target) throw new AppError(404, 'User not found');
+    if (target.role === 'SUPER_ADMIN') throw new AppError(400, 'Super Admin credentials are fixed and cannot be reset here');
+
+    await client.query(
+      `UPDATE users SET password_hash = $2, must_change_password = TRUE, password_changed_at = NOW(),
+                        password_reset_requested = FALSE, password_reset_requested_at = NULL
+       WHERE id = $1`,
+      [id, hash],
+    );
+    await writeAuditLog(
+      {
+        userId: req.user!.sub,
+        action: 'PASSWORD_RESET',
+        entityName: 'users',
+        entityId: id,
+        details: { username: target.username, requested_by_user: target.password_reset_requested },
+      },
+      client,
+    );
+
+    const updated = await client.query(`${USER_SELECT} WHERE u.id = $1`, [id]);
+    return updated.rows[0];
+  });
+
+  res.json({ success: true, message: `Temporary password set for ${user.username}`, data: user });
 }
 
 export async function deleteUser(req: Request, res: Response) {

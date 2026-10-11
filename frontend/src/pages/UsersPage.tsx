@@ -3,7 +3,19 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { AlertTriangle, Inbox, Loader2, RefreshCw, Search, Trash2, UserPlus, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  Inbox,
+  KeyRound,
+  Loader2,
+  RefreshCw,
+  Search,
+  Trash2,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { RoleBadge } from '@/components/RoleBadge';
 import { Button } from '@/components/ui/button';
@@ -15,7 +27,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FormField } from '@/components/FormField';
 import { useAuth } from '@/context/AuthContext';
-import { createUser, deleteUser, fetchUsers, fieldErrors, setUserActive } from '@/features/admin/api';
+import { createUser, deleteUser, fetchUsers, fieldErrors, resetUserPassword, setUserActive } from '@/features/admin/api';
 import { fetchStaff } from '@/features/reports/api';
 import { getErrorMessage } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/format';
@@ -24,6 +36,9 @@ import { ROLE_LABELS, type UserRole } from '@/types/auth';
 import type { MasterStaff } from '@/types/report';
 
 const ROLES: UserRole[] = ['HOD', 'DOCTOR', 'LAB_TECH', 'CLERK'];
+
+/** Matches the API's default; new staff must replace it at first sign-in. */
+const DEFAULT_STAFF_PASSWORD = 'pass1234';
 
 type StaffMode = 'existing' | 'new';
 
@@ -40,7 +55,10 @@ const userSchema = z
       .min(3, 'Username must be at least 3 characters')
       .max(50, 'Username must be at most 50 characters')
       .regex(/^[A-Za-z0-9._-]+$/, 'Use only letters, numbers, dot, dash or underscore'),
-    password: z.string().min(8, 'Password must be at least 8 characters').max(72, 'Password must be at most 72 characters'),
+    password: z
+      .string()
+      .max(72, 'Password must be at most 72 characters')
+      .refine((v) => v === '' || v.length >= 8, 'Password must be at least 8 characters'),
     confirm_password: z.string(),
     role: z.string().refine((v) => (ROLES as string[]).includes(v), 'Select a role'),
   })
@@ -152,7 +170,7 @@ function CreateUserDialog({
   });
 
   const onSubmit = async (v: UserFormValues) => {
-    const base = { username: v.username.trim(), password: v.password, role: v.role as UserRole };
+    const base = { username: v.username.trim(), password: v.password || undefined, role: v.role as UserRole };
     try {
       const user = await createUser(
         v.mode === 'existing'
@@ -271,11 +289,23 @@ function CreateUserDialog({
                 <FormField label="Username" htmlFor="username" required error={errors.username?.message}>
                   <Input id="username" autoComplete="off" aria-invalid={!!errors.username} {...register('username')} />
                 </FormField>
+                <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  Leave the password blank to use the default initial password{' '}
+                  <code className="rounded bg-white px-1.5 py-0.5 font-mono font-semibold">{DEFAULT_STAFF_PASSWORD}</code>. The user
+                  must set their own password at first sign-in either way.
+                </p>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField label="Password" htmlFor="password" required error={errors.password?.message}>
-                    <Input id="password" type="password" autoComplete="new-password" aria-invalid={!!errors.password} {...register('password')} />
+                  <FormField label="Initial Password" htmlFor="password" error={errors.password?.message}>
+                    <Input
+                      id="password"
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={`Default: ${DEFAULT_STAFF_PASSWORD}`}
+                      aria-invalid={!!errors.password}
+                      {...register('password')}
+                    />
                   </FormField>
-                  <FormField label="Confirm Password" htmlFor="confirm_password" required error={errors.confirm_password?.message}>
+                  <FormField label="Confirm Password" htmlFor="confirm_password" error={errors.confirm_password?.message}>
                     <Input
                       id="confirm_password"
                       type="password"
@@ -298,6 +328,178 @@ function CreateUserDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const TEMP_PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+
+/** Random "xxxx-xxxx-xxxx" password without look-alike characters (0/O, 1/l/I), easy to read out to the user. */
+function generateTempPassword(): string {
+  const bytes = crypto.getRandomValues(new Uint32Array(12));
+  const chars = Array.from(bytes, (b) => TEMP_PASSWORD_ALPHABET[b % TEMP_PASSWORD_ALPHABET.length]);
+  return [chars.slice(0, 4), chars.slice(4, 8), chars.slice(8)].map((g) => g.join('')).join('-');
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success('Temporary password copied');
+  } catch {
+    toast.error('Could not copy - select the password and copy it manually');
+  }
+}
+
+function ResetPasswordDialog({
+  target,
+  onClose,
+  onReset,
+}: {
+  target: AppUser | null;
+  onClose: () => void;
+  onReset: (user: AppUser) => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [issued, setIssued] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!target) return;
+    setPassword(generateTempPassword());
+    setError(null);
+    setIssued(null);
+  }, [target]);
+
+  const handleReset = async () => {
+    if (!target) return;
+    if (password.length < 8 || password.length > 72) {
+      setError('Temporary password must be 8 to 72 characters');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await resetUserPassword(target.id, password);
+      setIssued(password);
+      onReset(updated);
+      toast.success(`Temporary password set for ${updated.username}`);
+    } catch (err) {
+      const message = fieldErrors(err).password ?? getErrorMessage(err, 'Could not reset the password');
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!target} onOpenChange={(open) => !open && !saving && onClose()}>
+      <DialogContent className="max-w-md">
+        {target && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                  <KeyRound className="h-4 w-4" />
+                </span>
+                Reset Password
+              </DialogTitle>
+              <DialogDescription>
+                Issue a temporary password for <span className="font-mono font-semibold text-slate-900">{target.username}</span>
+                {target.staff_name && <> ({target.staff_name})</>}.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-4">
+              {issued ? (
+                <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                  <p className="flex items-center gap-2 font-medium">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Temporary password set
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 select-all rounded-md border border-emerald-200 bg-white px-3 py-2 font-mono text-base text-slate-900">
+                      {issued}
+                    </code>
+                    <Button type="button" size="icon" variant="outline" onClick={() => copyToClipboard(issued)} aria-label="Copy password">
+                      <Copy />
+                    </Button>
+                  </div>
+                  <p className="text-xs">
+                    Share it with the user in person. It is not shown again; they must set their own password at the next sign-in.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {target.password_reset_requested && (
+                    <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>
+                        The user requested a reset
+                        {target.password_reset_requested_at && <> on {formatDateTime(target.password_reset_requested_at)}</>}.
+                      </span>
+                    </p>
+                  )}
+                  <FormField
+                    label="Temporary Password"
+                    htmlFor="temp-password"
+                    required
+                    error={error ?? undefined}
+                    hint="The user must replace it at the next sign-in. Their open sessions end immediately."
+                  >
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="temp-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="off"
+                        spellCheck={false}
+                        maxLength={72}
+                        aria-invalid={!!error}
+                        className="font-mono"
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        onClick={() => setPassword(generateTempPassword())}
+                        disabled={saving}
+                        aria-label="Generate a new password"
+                        title="Generate a new password"
+                      >
+                        <RefreshCw />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        onClick={() => copyToClipboard(password)}
+                        aria-label="Copy password"
+                        title="Copy password"
+                      >
+                        <Copy />
+                      </Button>
+                    </div>
+                  </FormField>
+                </>
+              )}
+            </DialogBody>
+            <DialogFooter>
+              {issued ? (
+                <Button onClick={onClose}>Done</Button>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={onClose} disabled={saving}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleReset} disabled={saving}>
+                    {saving ? <Loader2 className="animate-spin" /> : <KeyRound />}
+                    {saving ? 'Resetting...' : 'Set Temporary Password'}
+                  </Button>
+                </>
+              )}
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -381,6 +583,7 @@ export default function UsersPage() {
   const [creating, setCreating] = useState(false);
   const [toggling, setToggling] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<AppUser | null>(null);
+  const [resetting, setResetting] = useState<AppUser | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -401,14 +604,15 @@ export default function UsersPage() {
   }, [load]);
 
   const term = search.trim().toLowerCase();
-  const visible = useMemo(
-    () =>
-      term
-        ? users.filter((u) => [u.username, u.staff_name, u.designation, u.role].some((v) => v?.toLowerCase().includes(term)))
-        : users,
-    [users, term],
-  );
+  const visible = useMemo(() => {
+    const matches = term
+      ? users.filter((u) => [u.username, u.staff_name, u.designation, u.role].some((v) => v?.toLowerCase().includes(term)))
+      : users;
+    // Pending reset requests first, so they are not missed in a long list.
+    return [...matches].sort((a, b) => Number(b.password_reset_requested) - Number(a.password_reset_requested));
+  }, [users, term]);
   const activeCount = users.filter((u) => u.is_active).length;
+  const resetRequests = users.filter((u) => u.password_reset_requested).length;
 
   const toggle = async (target: AppUser, isActive: boolean) => {
     setToggling(target.id);
@@ -447,6 +651,19 @@ export default function UsersPage() {
         </div>
       </div>
 
+      {resetRequests > 0 && (
+        <div role="status" className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <p>
+            <span className="font-semibold">
+              {resetRequests} password reset request{resetRequests === 1 ? '' : 's'} pending.
+            </span>{' '}
+            Use <span className="font-medium">Reset Password</span> on the highlighted account to issue a temporary password, then
+            hand it to the user in person.
+          </p>
+        </div>
+      )}
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle>User Accounts</CardTitle>
@@ -460,7 +677,7 @@ export default function UsersPage() {
             </div>
           )}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-sm">
+            <table className="w-full min-w-[980px] text-sm">
               <thead>
                 <tr className="border-y bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-2.5">Username</th>
@@ -494,12 +711,37 @@ export default function UsersPage() {
                     : u.has_clinical_records
                       ? 'Has clinical records - disable the account instead'
                       : null;
+                  const isSuperAdmin = u.role === 'SUPER_ADMIN';
+                  const rowClass = !u.is_active
+                    ? 'bg-slate-50/60 text-slate-500'
+                    : u.password_reset_requested
+                      ? 'bg-amber-50/50 hover:bg-amber-50'
+                      : 'hover:bg-slate-50/70';
                   return (
-                    <tr key={u.id} className={u.is_active ? 'hover:bg-slate-50/70' : 'bg-slate-50/60 text-slate-500'}>
+                    <tr key={u.id} className={rowClass}>
                       <td className="px-4 py-3">
-                        <span className="font-mono font-semibold text-slate-900">{u.username}</span>
-                        {isMe && <span className="ml-2 text-xs text-slate-500">(you)</span>}
-                        {!u.is_active && <Badge tone="red" className="ml-2">Disabled</Badge>}
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-mono font-semibold text-slate-900">{u.username}</span>
+                          {isMe && <span className="text-xs text-slate-500">(you)</span>}
+                          {!u.is_active && <Badge tone="red">Disabled</Badge>}
+                          {u.password_reset_requested && (
+                            <Badge
+                              tone="amber"
+                              title={
+                                u.password_reset_requested_at
+                                  ? `Requested ${formatDateTime(u.password_reset_requested_at)}`
+                                  : 'Requested from the login page'
+                              }
+                            >
+                              <KeyRound className="mr-1 h-3 w-3" /> Reset Requested
+                            </Badge>
+                          )}
+                          {!u.password_reset_requested && u.must_change_password && (
+                            <Badge tone="slate" title="Signed in with an initial or temporary password that has not been changed yet">
+                              Temporary Password
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-slate-900">{u.staff_name || '-'}</p>
@@ -522,6 +764,16 @@ export default function UsersPage() {
                             aria-label={`${u.is_active ? 'Deactivate' : 'Activate'} ${u.username}`}
                             title={isMe ? 'You cannot deactivate your own account' : undefined}
                           />
+                          <span title={isSuperAdmin ? 'Super Admin credentials are fixed' : `Issue a temporary password for ${u.username}`}>
+                            <Button
+                              size="sm"
+                              variant={u.password_reset_requested ? 'default' : 'outline'}
+                              disabled={isSuperAdmin}
+                              onClick={() => setResetting(u)}
+                            >
+                              <KeyRound /> Reset Password
+                            </Button>
+                          </span>
                           <span title={deleteBlockedReason ?? `Delete ${u.username}`}>
                             <Button
                               size="icon"
@@ -551,6 +803,12 @@ export default function UsersPage() {
         staff={staff}
         users={users}
         onCreated={load}
+      />
+
+      <ResetPasswordDialog
+        target={resetting}
+        onClose={() => setResetting(null)}
+        onReset={(updated) => setUsers((current) => current.map((u) => (u.id === updated.id ? updated : u)))}
       />
 
       <DeleteUserDialog

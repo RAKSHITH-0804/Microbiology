@@ -36,6 +36,15 @@ export const loginLimiter = rateLimit({
   message: { success: false, message: 'Too many failed login attempts. Please try again after 15 minutes.' },
 });
 
+/** Every request counts: the endpoint always succeeds, and each call writes an audit entry. */
+export const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many password reset requests. Please try again after 15 minutes.' },
+});
+
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 150,

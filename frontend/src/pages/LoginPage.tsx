@@ -14,8 +14,10 @@ import {
   User,
   type LucideIcon,
 } from 'lucide-react';
+import { ForgotPasswordModal } from '@/components/auth/ForgotPasswordModal';
 import { FloatingMicrobes, PetriDishLens } from '@/components/login/MicrobiologyVisuals';
 import { useAuth } from '@/context/AuthContext';
+import { CHANGE_PASSWORD_PATH } from '@/layout/navigation';
 import { getErrorMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -155,16 +157,17 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
-  if (user) return <Navigate to={from} replace />;
+  if (user) return <Navigate to={user.mustChangePassword ? CHANGE_PASSWORD_PATH : from} replace />;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await login(username.trim(), password);
-      navigate(from, { replace: true });
+      const signedIn = await login(username.trim(), password);
+      navigate(signedIn.mustChangePassword ? CHANGE_PASSWORD_PATH : from, { replace: true });
     } catch (err) {
       setError(getErrorMessage(err, 'Login failed'));
     } finally {
@@ -239,6 +242,15 @@ export default function LoginPage() {
                   </button>
                 }
               />
+              <div className="-mt-1 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setForgotOpen(true)}
+                  className="rounded text-sm font-medium text-blue-600 transition hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
+                >
+                  Forgot Password?
+                </button>
+              </div>
 
               <button
                 type="submit"
@@ -263,6 +275,7 @@ export default function LoginPage() {
 
         <ShowcasePanel />
       </div>
+      <ForgotPasswordModal open={forgotOpen} onOpenChange={setForgotOpen} initialUsername={username} />
     </div>
   );
 }

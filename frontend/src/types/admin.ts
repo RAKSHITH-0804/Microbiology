@@ -42,13 +42,19 @@ export interface AppUser {
   last_login_at: string | null;
   /** Registered requisitions or prepared / reported / verified reports; such accounts can only be disabled. */
   has_clinical_records: boolean;
+  /** Still on an initial or temporary password. */
+  must_change_password: boolean;
+  /** Submitted "Forgot Password?" from the login page and is waiting for a temporary password. */
+  password_reset_requested: boolean;
+  password_reset_requested_at: string | null;
 }
 
 export type StaffType = 'TEACHING' | 'NON_TEACHING';
 
 interface CreateUserBase {
   username: string;
-  password: string;
+  /** Omitted: the account starts on the default staff password. */
+  password?: string;
   role: UserRole;
 }
 

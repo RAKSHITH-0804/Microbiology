@@ -34,7 +34,10 @@ npm run dev
 
 Run the apps individually with `npm run dev:backend` or `npm run dev:frontend`.
 
-Default login: **hod / admin123** (change this after first login).
+Default logins:
+
+- **superadmin** with the password from `SUPERADMIN_DEFAULT_PASSWORD` in `backend/.env` (default `admin@123`).
+- Staff accounts (e.g. **hod**) start on **pass1234** and must set their own password at first sign-in.
 
 ## Environment
 

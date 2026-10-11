@@ -12,6 +12,11 @@ export async function fetchSession(): Promise<SessionInfo> {
   return res.data.data.session;
 }
 
+/** Files a reset request for the Super Admin; succeeds the same way whether or not the account exists. */
+export async function requestPasswordReset(username: string): Promise<void> {
+  await api.post('/auth/forgot-password', { username });
+}
+
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   await api.post('/auth/change-password', { currentPassword, newPassword });
 }

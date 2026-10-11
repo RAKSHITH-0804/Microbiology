@@ -5,7 +5,8 @@
   "scripts": {
     "migrate": "node migrate.js",
     "migrate:status": "node migrate.js --status",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "superadmin": "node superadmin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

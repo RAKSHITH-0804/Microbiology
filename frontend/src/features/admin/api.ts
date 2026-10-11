@@ -36,6 +36,11 @@ export async function setUserActive(id: number, isActive: boolean): Promise<AppU
   return res.data.data;
 }
 
+export async function resetUserPassword(id: number, password: string): Promise<AppUser> {
+  const res = await api.post<ApiResponse<AppUser>>(`/users/${id}/reset-password`, { password });
+  return res.data.data;
+}
+
 export async function deleteUser(id: number): Promise<{ message: string; staffDeleted: boolean }> {
   const res = await api.delete<ApiResponse<{ id: number; username: string; staff_deleted: boolean }>>(`/users/${id}`);
   return { message: res.data.message ?? 'User account deleted successfully', staffDeleted: res.data.data.staff_deleted };

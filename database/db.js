@@ -1,7 +1,9 @@
 const path = require('path');
 const { Client } = require('pg');
 
+// The root .env wins; backend/.env fills in keys it lacks (e.g. SUPERADMIN_DEFAULT_PASSWORD), so both apps share them.
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../backend/.env') });
 
 function createClient() {
   return new Client({

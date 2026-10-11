@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-/** Roles that can be assigned from User Management; Super Admin accounts are provisioned by migration only. */
+/** Initial password for new staff logins (HOD, doctors, lab staff, clerks); replaced at first sign-in. */
+export const DEFAULT_STAFF_PASSWORD = 'pass1234';
+
+/** Roles that can be assigned from User Management; the Super Admin account is provisioned by the seeder only. */
 export const USER_ROLES = ['HOD', 'DOCTOR', 'LAB_TECH', 'CLERK'] as const;
 
 export const STAFF_TYPES = ['TEACHING', 'NON_TEACHING'] as const;
@@ -20,10 +23,13 @@ export const createUserSchema = z
       .min(3, 'Username must be at least 3 characters')
       .max(50, 'Username must be at most 50 characters')
       .regex(/^[A-Za-z0-9._-]+$/, 'Use only letters, numbers, dot, dash or underscore'),
+    /** Omitted or blank: the account starts on DEFAULT_STAFF_PASSWORD. */
     password: z
       .string()
-      .min(8, 'Password must be at least 8 characters')
-      .max(72, 'Password must be at most 72 characters'),
+      .max(72, 'Password must be at most 72 characters')
+      .optional()
+      .transform((v) => v || undefined)
+      .refine((v) => v === undefined || v.length >= 8, 'Password must be at least 8 characters'),
     role: z.enum(USER_ROLES, { errorMap: () => ({ message: 'Select a role' }) }),
     staff_id: z.coerce.number({ invalid_type_error: 'Select a staff member' }).int().positive('Select a staff member').optional(),
     staff_type: z.enum(STAFF_TYPES, { errorMap: () => ({ message: 'Select the staff category' }) }).optional(),
@@ -54,5 +60,14 @@ export const userStatusSchema = z.object({
 
 export const userIdParams = z.object({ id: z.coerce.number().int().positive('Invalid user id') });
 
+/** Temporary password the Super Admin hands over; the user must replace it at the next sign-in. */
+export const resetPasswordSchema = z.object({
+  password: z
+    .string()
+    .min(8, 'Temporary password must be at least 8 characters')
+    .max(72, 'Temporary password must be at most 72 characters'),
+});
+
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UserStatusInput = z.infer<typeof userStatusSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

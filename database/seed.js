@@ -5,6 +5,7 @@
  */
 const bcrypt = require('bcryptjs');
 const { createClient } = require('./db');
+const { ensureSuperAdmin } = require('./superadmin');
 
 const staff = require('./seed-data/staff.json');
 const samples = require('./seed-data/samples.json');
@@ -13,9 +14,10 @@ const antibiotics = require('./seed-data/antibiotics.json');
 const testTemplates = require('./seed-data/test_templates.json');
 const testCatalog = require('./seed-data/test_catalog.json').map((t, i) => ({ ...t, sort_order: i + 1 }));
 
-const DEFAULT_HOD = { username: 'hod', password: 'admin123' };
-const DEFAULT_STAFF_PASSWORD = 'password123';
-const BCRYPT_ROUNDS = 12;
+const DEFAULT_HOD_USERNAME = 'hod';
+/** Initial password for every staff login (HOD, doctors, lab staff); replaced at first sign-in. */
+const DEFAULT_STAFF_PASSWORD = 'pass1234';
+const BCRYPT_ROUNDS = 10;
 
 /** Multi-row INSERT ... ON CONFLICT DO NOTHING; returns number of inserted rows. */
 async function bulkInsert(client, table, columns, rows, conflictTarget) {
@@ -39,12 +41,12 @@ function firstName(staffName) {
 
 function accountFor(member) {
   if (/\bHOD\b/i.test(member.designation)) {
-    return { username: DEFAULT_HOD.username, role: 'HOD', password: DEFAULT_HOD.password };
+    return { username: DEFAULT_HOD_USERNAME, role: 'HOD' };
   }
   if (member.staff_type === 'TEACHING') {
-    return { username: `dr.${firstName(member.name)}`, role: 'DOCTOR', password: DEFAULT_STAFF_PASSWORD };
+    return { username: `dr.${firstName(member.name)}`, role: 'DOCTOR' };
   }
-  return { username: firstName(member.name), role: 'LAB_TECH', password: DEFAULT_STAFF_PASSWORD };
+  return { username: firstName(member.name), role: 'LAB_TECH' };
 }
 
 /** One login per active staff member that has no account yet; existing accounts are never touched. */
@@ -58,13 +60,13 @@ async function seedStaffUsers(client) {
 
   const created = [];
   const skipped = [];
+  const hash = await bcrypt.hash(DEFAULT_STAFF_PASSWORD, BCRYPT_ROUNDS);
   for (const member of unlinked) {
     const account = accountFor(member);
-    const hash = await bcrypt.hash(account.password, BCRYPT_ROUNDS);
     const res = await client.query(
-      `INSERT INTO users (username, password_hash, role, staff_id, must_change_password) VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (username, password_hash, role, staff_id, must_change_password) VALUES ($1, $2, $3, $4, TRUE)
        ON CONFLICT ((LOWER(username))) DO NOTHING`,
-      [account.username, hash, account.role, member.id, account.role !== 'HOD'],
+      [account.username, hash, account.role, member.id],
     );
     (res.rowCount ? created : skipped).push({ ...account, staff: member.name });
   }
@@ -93,6 +95,7 @@ async function main() {
       ),
     };
     const users = await seedStaffUsers(client);
+    const superAdmin = await ensureSuperAdmin(client);
 
     await client.query('COMMIT');
 
@@ -100,14 +103,20 @@ async function main() {
     for (const [table, count] of Object.entries(results)) console.log(`  ${table.padEnd(24)} ${count}`);
     console.log(`  ${'users'.padEnd(24)} ${users.created.length}`);
     for (const u of users.created) {
-      console.log(`    + ${u.username.padEnd(18)} ${u.role.padEnd(9)} ${u.password.padEnd(12)} ${u.staff}`);
+      console.log(`    + ${u.username.padEnd(18)} ${u.role.padEnd(9)} ${u.staff}`);
     }
     for (const u of users.skipped) {
       console.log(`    ! ${u.username.padEnd(18)} username already taken - no account created for ${u.staff}`);
     }
-    if (users.created.some((u) => u.password === DEFAULT_STAFF_PASSWORD)) {
-      console.log(`  New staff accounts share the default password "${DEFAULT_STAFF_PASSWORD}".`);
+    if (users.created.length) {
+      console.log(`  New staff accounts (HOD included) start on "${DEFAULT_STAFF_PASSWORD}" and must change it at first login.`);
     }
+    const synced = [...superAdmin.created, ...superAdmin.updated];
+    console.log(
+      synced.length
+        ? `  Super Admin login set from SUPERADMIN_DEFAULT_PASSWORD: ${synced.join(', ')}`
+        : '  Super Admin login already matches SUPERADMIN_DEFAULT_PASSWORD.',
+    );
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

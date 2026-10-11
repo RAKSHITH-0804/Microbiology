@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '../../config/db';
-import { DISABLED_MODULES_SQL } from '../../middleware/auth';
+import { DISABLED_MODULES_SQL, mustChangePasswordFor } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
 import { AUTH_COOKIE, authCookieOptions, signToken, UserRole, verifyToken } from '../../utils/jwt';
-import { ChangePasswordInput, LoginInput } from './auth.schema';
+import { ChangePasswordInput, ForgotPasswordInput, LoginInput } from './auth.schema';
 
 const BCRYPT_ROUNDS = 10;
 
@@ -36,7 +36,7 @@ function toPublicUser(row: UserRow) {
     staffId: row.staff_id,
     name: row.staff_name ?? row.username,
     designation: row.designation,
-    mustChangePassword: row.must_change_password,
+    mustChangePassword: mustChangePasswordFor(row.role, row.must_change_password),
     disabledModules: row.role === 'SUPER_ADMIN' ? [] : row.disabled_modules,
   };
 }
@@ -63,6 +63,46 @@ export async function login(req: Request, res: Response) {
   });
 
   res.json({ success: true, data: { user: toPublicUser(user) } });
+}
+
+/**
+ * Flags the account for the Super Admin, who issues a temporary password from User Management.
+ * Answers the same whether or not the account exists, so it cannot be used to probe usernames.
+ */
+export async function forgotPassword(req: Request, res: Response) {
+  const { username } = req.body as ForgotPasswordInput;
+  const staffId = /^\d{1,9}$/.test(username) ? Number(username) : null;
+
+  const { rows } = await query<{ id: number; username: string }>(
+    `SELECT id, username FROM users
+     WHERE is_active AND role <> 'SUPER_ADMIN'
+       AND (LOWER(username) = LOWER($1) OR staff_id = $2)
+     ORDER BY LOWER(username) = LOWER($1) DESC
+     LIMIT 1`,
+    [username, staffId],
+  );
+  const user = rows[0];
+
+  if (user) {
+    await withTransaction(async (client) => {
+      await client.query(
+        'UPDATE users SET password_reset_requested = TRUE, password_reset_requested_at = NOW() WHERE id = $1',
+        [user.id],
+      );
+      await writeAuditLog(
+        {
+          userId: user.id,
+          action: 'PASSWORD_RESET_REQUESTED',
+          entityName: 'users',
+          entityId: user.id,
+          details: { username: user.username, ip: req.ip, userAgent: req.get('user-agent') },
+        },
+        client,
+      );
+    });
+  }
+
+  res.json({ success: true, message: 'Reset request recorded' });
 }
 
 export async function logout(req: Request, res: Response) {
@@ -121,7 +161,9 @@ export async function changePassword(req: Request, res: Response) {
   const changedAt = new Date();
   await withTransaction(async (client) => {
     await client.query(
-      'UPDATE users SET password_hash = $2, password_changed_at = $3, must_change_password = FALSE WHERE id = $1',
+      `UPDATE users SET password_hash = $2, password_changed_at = $3, must_change_password = FALSE,
+                        password_reset_requested = FALSE, password_reset_requested_at = NULL
+       WHERE id = $1`,
       [userId, hash, changedAt],
     );
     await writeAuditLog(
