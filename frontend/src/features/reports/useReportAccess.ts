@@ -1,7 +1,7 @@
 import { toast } from 'sonner';
 import { NOTHING_TO_PRINT_MESSAGE } from '@/components/reports/ReportPageFrame';
 import { useAuth } from '@/context/AuthContext';
-import { canUse, MODULE_DISABLED_MESSAGE, REPORT_AUTHOR_ROLES } from '@/layout/navigation';
+import { canUse, hasGrant, MODULE_DISABLED_MESSAGE, REPORT_AUTHOR_ROLES } from '@/layout/navigation';
 import { usePrintOnLoad } from './usePrintOnLoad';
 
 interface Options {
@@ -19,7 +19,7 @@ interface Options {
  */
 export function useReportAccess({ loaded, report, requisitionVerified, isDirty }: Options) {
   const { user } = useAuth();
-  const authorRole = !!user && REPORT_AUTHOR_ROLES.includes(user.role);
+  const authorRole = !!user && (REPORT_AUTHOR_ROLES.includes(user.role) || hasGrant(user, 'pending_worklist', 'verification'));
   const canAuthor = authorRole && canUse(user, undefined, 'pending_worklist', 'verification');
   const verified = !!report?.is_verified;
   const locked = requisitionVerified || verified;

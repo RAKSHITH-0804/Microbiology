@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '../../config/db';
-import { DISABLED_MODULES_SQL, mustChangePasswordFor } from '../../middleware/auth';
+import { mustChangePasswordFor } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
+import { notifyUserManagers, resolveNotifications } from '../notifications/notification.service';
+import { MODULE_OVERRIDES_SQL, resolveModules } from '../permissions/permission.modules';
 import { AUTH_COOKIE, authCookieOptions, signToken, UserRole, verifyToken } from '../../utils/jwt';
 import { ChangePasswordInput, ForgotPasswordInput, LoginInput } from './auth.schema';
 
@@ -19,16 +21,18 @@ interface UserRow {
   staff_name: string | null;
   designation: string | null;
   must_change_password: boolean;
+  enabled_modules: string[];
   disabled_modules: string[];
 }
 
 const USER_SELECT = `
   SELECT u.id, u.username, u.password_hash, u.role, u.is_active, u.staff_id, u.must_change_password,
-         s.name AS staff_name, s.designation, ${DISABLED_MODULES_SQL('u.id')}
+         s.name AS staff_name, s.designation, ${MODULE_OVERRIDES_SQL('u.id')}
   FROM users u
   LEFT JOIN master_staff s ON s.id = u.staff_id`;
 
 function toPublicUser(row: UserRow) {
+  const { modules, granted } = resolveModules(row.role, row.enabled_modules, row.disabled_modules);
   return {
     id: row.id,
     username: row.username,
@@ -37,7 +41,8 @@ function toPublicUser(row: UserRow) {
     name: row.staff_name ?? row.username,
     designation: row.designation,
     mustChangePassword: mustChangePasswordFor(row.role, row.must_change_password),
-    disabledModules: row.role === 'SUPER_ADMIN' ? [] : row.disabled_modules,
+    modules,
+    grantedModules: granted,
   };
 }
 
@@ -73,11 +78,12 @@ export async function forgotPassword(req: Request, res: Response) {
   const { username } = req.body as ForgotPasswordInput;
   const staffId = /^\d{1,9}$/.test(username) ? Number(username) : null;
 
-  const { rows } = await query<{ id: number; username: string }>(
-    `SELECT id, username FROM users
-     WHERE is_active AND role <> 'SUPER_ADMIN'
-       AND (LOWER(username) = LOWER($1) OR staff_id = $2)
-     ORDER BY LOWER(username) = LOWER($1) DESC
+  const { rows } = await query<{ id: number; username: string; staff_name: string | null; already_requested: boolean }>(
+    `SELECT u.id, u.username, s.name AS staff_name, u.password_reset_requested AS already_requested
+     FROM users u LEFT JOIN master_staff s ON s.id = u.staff_id
+     WHERE u.is_active AND u.role <> 'SUPER_ADMIN'
+       AND (LOWER(u.username) = LOWER($1) OR u.staff_id = $2)
+     ORDER BY LOWER(u.username) = LOWER($1) DESC
      LIMIT 1`,
     [username, staffId],
   );
@@ -89,6 +95,18 @@ export async function forgotPassword(req: Request, res: Response) {
         'UPDATE users SET password_reset_requested = TRUE, password_reset_requested_at = NOW() WHERE id = $1',
         [user.id],
       );
+      // Repeated requests for the same account keep the one open notification.
+      if (!user.already_requested) {
+        const who = user.staff_name ? `${user.staff_name} (${user.username})` : user.username;
+        await notifyUserManagers(client, {
+          type: 'PASSWORD_RESET',
+          title: 'Password reset requested',
+          message: `${who} asked for a password reset.`,
+          link: '/users',
+          entityName: 'users',
+          entityId: user.id,
+        });
+      }
       await writeAuditLog(
         {
           userId: user.id,
@@ -166,6 +184,7 @@ export async function changePassword(req: Request, res: Response) {
        WHERE id = $1`,
       [userId, hash, changedAt],
     );
+    await resolveNotifications(client, 'PASSWORD_RESET', 'users', userId);
     await writeAuditLog(
       {
         userId,

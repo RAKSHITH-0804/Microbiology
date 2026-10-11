@@ -2,10 +2,12 @@ import { api, ApiResponse } from '@/lib/api';
 import type { ModuleKey, UserRole } from '@/types/auth';
 
 export interface ModuleState {
-  /** The user's role can use this module at all. */
+  /** The switch can be changed (every module, except on Super Admin accounts). */
   allowed: boolean;
-  /** Allowed and not switched off by the Super Admin. */
+  /** The user can open the module. */
   enabled: boolean;
+  /** In the role's default set; enabled without it means an explicit grant. */
+  role_default: boolean;
 }
 
 export interface PermissionUser {
@@ -15,7 +17,7 @@ export interface PermissionUser {
   designation: string | null;
   staff_type: 'TEACHING' | 'NON_TEACHING' | null;
   role: UserRole;
-  /** False for Super Admin accounts, whose access cannot be reduced. */
+  /** False for Super Admin accounts, whose access cannot be changed. */
   restrictable: boolean;
   permissions: Record<ModuleKey, ModuleState>;
 }
@@ -36,4 +38,16 @@ export async function updatePermission(userId: number, moduleKey: ModuleKey, isE
     is_enabled: isEnabled,
   });
   return res.data.data;
+}
+
+/** Grant All (true) or Revoke All (false) for one account. */
+export async function setAllPermissions(userId: number, isEnabled: boolean): Promise<{ user: PermissionUser; message: string }> {
+  const res = await api.put<ApiResponse<PermissionUser>>(`/permissions/${userId}/all`, { is_enabled: isEnabled });
+  return { user: res.data.data, message: res.data.message ?? '' };
+}
+
+/** Every module for every active staff account; returns the refreshed matrix. */
+export async function setAllPermissionsForEveryone(isEnabled: boolean): Promise<{ matrix: PermissionMatrix; message: string }> {
+  const res = await api.put<ApiResponse<PermissionMatrix>>('/permissions/all', { is_enabled: isEnabled });
+  return { matrix: res.data.data, message: res.data.message ?? '' };
 }

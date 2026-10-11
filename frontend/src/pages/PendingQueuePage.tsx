@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { StatusPill } from '@/components/reports/StatusPill';
+import { PatientDetails, SampleBadge } from '@/components/requisitions/PatientCells';
 import { ReportStaff } from '@/components/requisitions/ReportStaff';
 import { useAuth } from '@/context/AuthContext';
 import { fetchPendingRequisitions } from '@/features/requisitions/api';
 import { canUse, REQUISITION_EDIT_ROLES } from '@/layout/navigation';
 import { getErrorMessage } from '@/lib/api';
-import { formatAge, formatDateTime, formatSex } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import type { PendingRequisition } from '@/types/requisition';
 
 export default function PendingQueuePage() {
@@ -42,7 +43,7 @@ export default function PendingQueuePage() {
     () =>
       term
         ? rows.filter((r) =>
-            [r.lab_no, r.receipt_no, r.patient.name, r.sample_nature, r.prepared_by_name, r.reported_by_name].some((v) =>
+            [r.lab_no, r.receipt_no, r.patient.name, r.patient.phone, r.sample_nature, r.prepared_by_name, r.reported_by_name].some((v) =>
               v?.toLowerCase().includes(term),
             ),
           )
@@ -66,7 +67,7 @@ export default function PendingQueuePage() {
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search lab no, patient, sample, staff"
+              placeholder="Search lab no, patient, phone, sample, staff"
               className="w-64 pl-8"
             />
           </div>
@@ -91,34 +92,36 @@ export default function PendingQueuePage() {
 
           <table className="w-full table-fixed text-sm">
             <colgroup>
-              <col className="w-[13%]" />
+              <col className="w-[12%]" />
               <col />
-              <col className="w-[14%]" />
-              <col className="w-[17%]" />
-              <col className="w-[11%]" />
+              <col className="w-[13%]" />
+              <col className="w-[12%]" />
+              <col className="w-[15%]" />
+              <col className="w-[10%]" />
               <col className="w-[11rem]" />
             </colgroup>
             <thead>
               <tr className="border-y bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2.5">Lab / Receipt No</th>
-                <th className="px-4 py-2.5">Patient &amp; Sample</th>
-                <th className="px-4 py-2.5">Received On</th>
-                <th className="px-4 py-2.5">Prepared / Reported By</th>
-                <th className="px-4 py-2.5">Status</th>
-                <th className="px-4 py-2.5">Actions</th>
+                <th className="px-3 py-2.5">Lab / Receipt No</th>
+                <th className="px-3 py-2.5">Patient Details</th>
+                <th className="px-3 py-2.5">Specimen / Sample</th>
+                <th className="px-3 py-2.5">Received On</th>
+                <th className="px-3 py-2.5">Prepared / Reported By</th>
+                <th className="px-3 py-2.5">Status</th>
+                <th className="px-3 py-2.5">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
                     <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading worklist...
                   </td>
                 </tr>
               )}
               {!loading && visible.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                     <Inbox className="mx-auto mb-2 h-8 w-8 text-slate-300" />
                     {term ? 'No samples match your search.' : 'No pending samples. New requisitions will appear here.'}
                   </td>
@@ -126,25 +129,24 @@ export default function PendingQueuePage() {
               )}
               {visible.map((r) => (
                 <tr key={r.id} className="align-top hover:bg-slate-50/70">
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <p className="break-words font-mono font-semibold text-slate-900">{r.lab_no}</p>
                     <p className="mt-0.5 break-words text-xs text-slate-500">Receipt {r.receipt_no || '-'}</p>
                   </td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-slate-900">{r.patient.name}</p>
-                    <p className="text-xs text-slate-500">
-                      {formatAge(r.patient)} / {formatSex(r.patient.sex)}
-                      {r.sample_nature && ` - ${r.sample_nature}`}
-                    </p>
+                  <td className="px-3 py-3">
+                    <PatientDetails patient={r.patient} />
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{formatDateTime(r.sample_received_datetime)}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
+                    <SampleBadge sample={r.sample_nature} />
+                  </td>
+                  <td className="px-3 py-3 text-slate-600">{formatDateTime(r.sample_received_datetime)}</td>
+                  <td className="px-3 py-3">
                     <ReportStaff preparedBy={r.prepared_by_name} reportedBy={r.reported_by_name} />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <StatusPill status={r.status} />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <div className="flex w-36 flex-col items-stretch gap-1.5">
                       {canEditRequisitions && (
                         <Button asChild size="sm" variant="outline" className="justify-start" title="Edit requisition">

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Inbox, Loader2, RefreshCw, Search, X } from 'lucide-react';
+import { AuditDetails } from '@/components/audit/AuditDetails';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -30,6 +31,7 @@ const ACTION_TONE: Record<string, BadgeProps['tone']> = {
   VERIFIED_PAYMENT_OVERRIDE: 'red',
   REVENUE_EXPORT: 'violet',
   PERMISSION_UPDATE: 'violet',
+  PERMISSION_BULK_UPDATE: 'violet',
   PASSWORD_CHANGE: 'slate',
   PASSWORD_RESET_REQUESTED: 'amber',
   PASSWORD_RESET: 'violet',
@@ -85,6 +87,12 @@ function describe(e: AuditLogEntry): string {
     case 'PERMISSION_UPDATE:users': {
       const module = MODULE_LABELS[d.module_key as ModuleKey] ?? String(d.module_key ?? '');
       return `${d.to ? 'Enabled' : 'Disabled'} ${module} for "${String(d.username ?? '')}"`;
+    }
+    case 'PERMISSION_BULK_UPDATE:users': {
+      const granted = Array.isArray(d.granted);
+      const count = ((granted ? d.granted : d.revoked) as unknown[] | undefined)?.length ?? 0;
+      const scope = d.scope === 'all_users' ? ' (Grant All to Everyone)' : '';
+      return `${granted ? 'Granted' : 'Revoked'} ${count} module(s) for "${String(d.username ?? '')}"${scope}`;
     }
     case 'PAYMENT_UPDATE:requisitions':
       return `Updated payment for${lab}`;
@@ -289,9 +297,7 @@ export default function AuditLogsPage() {
                       {open && (
                         <tr className="bg-slate-50">
                           <td colSpan={6} className="px-4 py-3">
-                            <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border bg-white p-3 font-mono text-xs text-slate-700">
-                              {e.details ? JSON.stringify(e.details, null, 2) : 'No additional details recorded.'}
-                            </pre>
+                            <AuditDetails details={e.details} />
                           </td>
                         </tr>
                       )}

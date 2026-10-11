@@ -5,6 +5,7 @@ import auditRoutes from '../modules/audit/audit.routes';
 import authRoutes from '../modules/auth/auth.routes';
 import dashboardRoutes from '../modules/dashboard/dashboard.routes';
 import masterRoutes from '../modules/master/master.routes';
+import notificationRoutes from '../modules/notifications/notification.routes';
 import paymentRoutes from '../modules/payments/payment.routes';
 import permissionRoutes from '../modules/permissions/permission.routes';
 import reportRoutes from '../modules/reports/report.routes';
@@ -34,6 +35,7 @@ router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/permissions', permissionRoutes);
 router.use('/audit-logs', auditRoutes);
+router.use('/notifications', notificationRoutes);
 router.use('/settings', settingsRoutes);
 
 export default router;

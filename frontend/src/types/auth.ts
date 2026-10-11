@@ -36,8 +36,10 @@ export interface User {
   designation: string | null;
   /** Still on the temporary password issued by the administrator; every page stays blocked until it is replaced. */
   mustChangePassword: boolean;
-  /** Modules the Super Admin has switched off for this account. */
-  disabledModules: ModuleKey[];
+  /** Modules this account can open: role defaults with the Super Admin's per-user overrides applied. */
+  modules: ModuleKey[];
+  /** Modules granted beyond the role's defaults; they unlock the module regardless of role. */
+  grantedModules: ModuleKey[];
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {

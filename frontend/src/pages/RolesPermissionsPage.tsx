@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Inbox, KeyRound, Loader2, Lock, Minus, RefreshCw, Search } from 'lucide-react';
+import { Ban, CheckCheck, Inbox, KeyRound, Loader2, Lock, RefreshCw, Search, ShieldAlert, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
 import { RoleBadge } from '@/components/RoleBadge';
-import { fetchPermissionMatrix, updatePermission, type PermissionUser } from '@/features/admin/permissions';
+import {
+  fetchPermissionMatrix,
+  setAllPermissions,
+  setAllPermissionsForEveryone,
+  updatePermission,
+  type PermissionUser,
+} from '@/features/admin/permissions';
 import { getErrorMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { MODULE_KEYS, MODULE_LABELS, ROLE_LABELS, type ModuleKey, type UserRole } from '@/types/auth';
@@ -16,6 +23,7 @@ const STAFF_CATEGORY: Record<string, string> = { TEACHING: 'Teaching', NON_TEACH
 const ROLE_FILTERS: UserRole[] = ['SUPER_ADMIN', 'HOD', 'DOCTOR', 'LAB_TECH', 'CLERK'];
 
 const cellKey = (userId: number, module: ModuleKey) => `${userId}:${module}`;
+const rowKey = (userId: number) => `${userId}:*`;
 
 function ModuleCell({
   user,
@@ -32,16 +40,16 @@ function ModuleCell({
   const label = `${MODULE_LABELS[module]} for ${user.name}`;
 
   if (!state.allowed) {
-    return (
-      <span title={`Not available to the ${ROLE_LABELS[user.role]} role`} className="inline-flex text-slate-300">
-        <Minus className="h-4 w-4" aria-label={`${label}: not available`} />
-      </span>
-    );
-  }
-  if (!user.restrictable) {
-    return (
+    return state.enabled ? (
       <span title="Super Admin access cannot be restricted" className="inline-flex items-center gap-1 text-emerald-600">
         <Lock className="h-3.5 w-3.5" aria-label={`${label}: always on`} />
+      </span>
+    ) : (
+      <span
+        title="The Super Admin account has no staff signature; reports are verified by doctors"
+        className="inline-flex items-center gap-1 text-slate-300"
+      >
+        <Lock className="h-3.5 w-3.5" aria-label={`${label}: not applicable`} />
       </span>
     );
   }
@@ -53,6 +61,53 @@ function ModuleCell({
   );
 }
 
+function GrantEveryoneDialog({
+  open,
+  count,
+  saving,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  count: number;
+  saving: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-50 text-amber-600">
+              <ShieldAlert className="h-5 w-5" />
+            </span>
+            Grant all modules to everyone?
+          </DialogTitle>
+          <DialogDescription>
+            Every one of the {count} active staff account(s) will be able to open all {MODULE_KEYS.length} modules.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            This includes Users, Master Data and Audit Logs, so every account will be able to create and disable
+            staff logins, reset their passwords, edit master lists and read the full audit trail. Super Admin
+            accounts and this permission matrix stay with the Super Admin.
+          </p>
+        </DialogBody>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={onConfirm} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <CheckCheck />} Grant All to Everyone
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function RolesPermissionsPage() {
   const [users, setUsers] = useState<PermissionUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +115,8 @@ export default function RolesPermissionsPage() {
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<UserRole | ''>('');
+  const [confirmEveryone, setConfirmEveryone] = useState(false);
+  const [grantingEveryone, setGrantingEveryone] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +134,14 @@ export default function RolesPermissionsPage() {
     load();
   }, [load]);
 
+  const markSaving = (key: string, on: boolean) =>
+    setSaving((s) => {
+      const next = new Set(s);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+
   /** Updates one cell only, so overlapping toggles on the same row don't overwrite each other. */
   const setCell = (userId: number, module: ModuleKey, enabled: boolean) =>
     setUsers((list) =>
@@ -85,9 +150,11 @@ export default function RolesPermissionsPage() {
       ),
     );
 
+  const replaceUser = (updated: PermissionUser) => setUsers((list) => list.map((u) => (u.id === updated.id ? updated : u)));
+
   const toggle = async (user: PermissionUser, module: ModuleKey, enabled: boolean) => {
     const key = cellKey(user.id, module);
-    setSaving((s) => new Set(s).add(key));
+    markSaving(key, true);
     setCell(user.id, module, enabled);
     try {
       const saved = await updatePermission(user.id, module, enabled);
@@ -97,11 +164,35 @@ export default function RolesPermissionsPage() {
       setCell(user.id, module, !enabled);
       toast.error(getErrorMessage(err, 'Could not update the permission'), { id: key });
     } finally {
-      setSaving((s) => {
-        const next = new Set(s);
-        next.delete(key);
-        return next;
-      });
+      markSaving(key, false);
+    }
+  };
+
+  const setRow = async (user: PermissionUser, enabled: boolean) => {
+    const key = rowKey(user.id);
+    markSaving(key, true);
+    try {
+      const { user: saved, message } = await setAllPermissions(user.id, enabled);
+      replaceUser(saved);
+      toast.success(message, { id: key });
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not update the permissions'), { id: key });
+    } finally {
+      markSaving(key, false);
+    }
+  };
+
+  const grantEveryone = async () => {
+    setGrantingEveryone(true);
+    try {
+      const { matrix, message } = await setAllPermissionsForEveryone(true);
+      setUsers(matrix.users);
+      setConfirmEveryone(false);
+      toast.success(message);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not grant access to everyone'));
+    } finally {
+      setGrantingEveryone(false);
     }
   };
 
@@ -114,9 +205,18 @@ export default function RolesPermissionsPage() {
     );
   }, [users, search, roleFilter]);
 
-  const disabledCount = users.reduce(
-    (n, u) => n + MODULE_KEYS.filter((m) => u.permissions[m].allowed && !u.permissions[m].enabled).length,
-    0,
+  const staffAccounts = users.filter((u) => u.restrictable);
+  const everyoneHasAll = staffAccounts.every((u) => MODULE_KEYS.every((m) => u.permissions[m].enabled));
+  const { granted, revoked } = staffAccounts.reduce(
+    (acc, u) => {
+      for (const m of MODULE_KEYS) {
+        const p = u.permissions[m];
+        if (p.enabled && !p.role_default) acc.granted += 1;
+        if (!p.enabled && p.role_default) acc.revoked += 1;
+      }
+      return acc;
+    },
+    { granted: 0, revoked: 0 },
   );
 
   return (
@@ -128,7 +228,7 @@ export default function RolesPermissionsPage() {
             <KeyRound className="h-5 w-5 text-primary" /> Roles &amp; Permissions
           </h2>
           <p className="text-sm text-muted-foreground">
-            Switch individual modules off for an account. A role&apos;s own limits always apply; switches only narrow them.
+            Switch any module on or off for any staff account. Each role starts from its default set; switches override it.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -154,12 +254,22 @@ export default function RolesPermissionsPage() {
       </div>
 
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>Permission Matrix</CardTitle>
-          <CardDescription>
-            Changes apply immediately: the user loses the sidebar link and the API answers 403 for that module.
-            {disabledCount > 0 && ` ${disabledCount} module switch(es) currently off.`}
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 pb-3">
+          <div className="space-y-1.5">
+            <CardTitle>Permission Matrix</CardTitle>
+            <CardDescription>
+              Changes apply immediately: the user gains or loses the sidebar link and the matching API access.
+              {granted > 0 && ` ${granted} extra module grant(s).`}
+              {revoked > 0 && ` ${revoked} default module(s) switched off.`}
+            </CardDescription>
+          </div>
+          <Button
+            onClick={() => setConfirmEveryone(true)}
+            disabled={loading || grantingEveryone || staffAccounts.length === 0 || everyoneHasAll}
+            title={everyoneHasAll ? 'Every staff account already has every module' : undefined}
+          >
+            <CheckCheck /> Grant All to Everyone
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           {error && (
@@ -169,10 +279,10 @@ export default function RolesPermissionsPage() {
             </div>
           )}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1280px] text-sm">
+            <table className="w-full min-w-[1400px] text-sm">
               <thead>
                 <tr className="border-y bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <th className="sticky left-0 z-10 bg-slate-50 px-4 py-2.5">User Name</th>
+                  <th className="sticky left-0 z-10 min-w-[15rem] bg-slate-50 px-4 py-2.5">User Name</th>
                   <th className="px-3 py-2.5">Staff Category</th>
                   <th className="px-3 py-2.5">Role</th>
                   {MODULE_KEYS.map((m) => (
@@ -196,53 +306,98 @@ export default function RolesPermissionsPage() {
                     </td>
                   </tr>
                 )}
-                {visible.map((u) => (
-                  <tr key={u.id} className="group hover:bg-slate-50/70">
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3 group-hover:bg-slate-50">
-                      <p className="font-medium text-slate-900">{u.name}</p>
-                      <p className="text-xs text-slate-500">
-                        <span className="font-mono">{u.username}</span>
-                        {u.designation && ` - ${u.designation}`}
-                      </p>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-slate-600">
-                      {u.staff_type ? STAFF_CATEGORY[u.staff_type] : <span className="text-slate-400">-</span>}
-                    </td>
-                    <td className="px-3 py-3">
-                      <RoleBadge role={u.role} />
-                    </td>
-                    {MODULE_KEYS.map((m) => (
-                      <td
-                        key={m}
-                        className={cn(
-                          'px-2 py-3 text-center',
-                          u.permissions[m].allowed && !u.permissions[m].enabled && 'bg-red-50/60',
+                {visible.map((u) => {
+                  const rowSaving = saving.has(rowKey(u.id)) || grantingEveryone;
+                  const allOn = MODULE_KEYS.every((m) => u.permissions[m].enabled);
+                  const allOff = MODULE_KEYS.every((m) => !u.permissions[m].enabled);
+                  return (
+                    <tr key={u.id} className="group hover:bg-slate-50/70">
+                      <td className="sticky left-0 z-10 bg-card px-4 py-3 group-hover:bg-slate-50">
+                        <p className="font-medium text-slate-900">{u.name}</p>
+                        <p className="text-xs text-slate-500">
+                          <span className="font-mono">{u.username}</span>
+                          {u.designation && ` - ${u.designation}`}
+                        </p>
+                        {u.restrictable && (
+                          <div className="mt-2 flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-emerald-700 hover:text-emerald-800"
+                              disabled={rowSaving || allOn}
+                              onClick={() => setRow(u, true)}
+                              title={`Enable all ${MODULE_KEYS.length} modules for ${u.name}`}
+                            >
+                              {rowSaving ? <Loader2 className="animate-spin" /> : <CheckCheck />} Grant All
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-red-600 hover:text-red-700"
+                              disabled={rowSaving || allOff}
+                              onClick={() => setRow(u, false)}
+                              title={`Disable every module for ${u.name}`}
+                            >
+                              <Ban /> Revoke All
+                            </Button>
+                          </div>
                         )}
-                      >
-                        <ModuleCell
-                          user={u}
-                          module={m}
-                          saving={saving.has(cellKey(u.id, m))}
-                          onToggle={(enabled) => toggle(u, m, enabled)}
-                        />
                       </td>
-                    ))}
-                  </tr>
-                ))}
+                      <td className="whitespace-nowrap px-3 py-3 text-slate-600">
+                        {u.staff_type ? STAFF_CATEGORY[u.staff_type] : <span className="text-slate-400">-</span>}
+                      </td>
+                      <td className="px-3 py-3">
+                        <RoleBadge role={u.role} />
+                      </td>
+                      {MODULE_KEYS.map((m) => {
+                        const p = u.permissions[m];
+                        return (
+                          <td
+                            key={m}
+                            className={cn(
+                              'px-2 py-3 text-center',
+                              p.allowed && p.enabled && !p.role_default && 'bg-violet-50/70',
+                              p.allowed && !p.enabled && p.role_default && 'bg-red-50/60',
+                            )}
+                          >
+                            <ModuleCell
+                              user={u}
+                              module={m}
+                              saving={rowSaving || saving.has(cellKey(u.id, m))}
+                              onToggle={(enabled) => toggle(u, m, enabled)}
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-1 border-t px-4 py-3 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
-              <Minus className="h-3.5 w-3.5 text-slate-300" /> Not part of the role
+              <span className="h-3 w-3 rounded-sm bg-violet-100 ring-1 ring-violet-200" />
+              <Sparkles className="h-3.5 w-3.5 text-violet-500" /> Granted beyond the role&apos;s defaults
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded-sm bg-red-100 ring-1 ring-red-200" /> Default module switched off
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Lock className="h-3.5 w-3.5 text-emerald-600" /> Super Admin - always on
             </span>
-            <span>Master Data, Users and Audit Logs belong to the Super Admin role only.</span>
+            <span>Role-specific rules still apply inside a module, e.g. doctors see only the reports assigned to them.</span>
           </div>
         </CardContent>
       </Card>
+
+      <GrantEveryoneDialog
+        open={confirmEveryone}
+        count={staffAccounts.length}
+        saving={grantingEveryone}
+        onOpenChange={setConfirmEveryone}
+        onConfirm={grantEveryone}
+      />
     </div>
   );
 }

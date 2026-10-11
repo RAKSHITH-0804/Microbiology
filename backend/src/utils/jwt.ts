@@ -1,6 +1,7 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { CookieOptions } from 'express';
 import { env, isProduction } from '../config/env';
+import type { ModuleKey } from '../modules/permissions/permission.modules';
 
 export type UserRole = 'SUPER_ADMIN' | 'HOD' | 'DOCTOR' | 'LAB_TECH' | 'CLERK';
 
@@ -16,8 +17,10 @@ export interface JwtPayload {
 export interface AuthUser extends JwtPayload {
   staff_id: number | null;
   must_change_password: boolean;
-  /** Module keys the Super Admin has switched off for this user (see user_permissions). */
-  disabled_modules: string[];
+  /** Modules the user can open: role defaults with the Super Admin's per-user overrides applied. */
+  modules: ModuleKey[];
+  /** Modules granted beyond the role's defaults; they unlock that module's routes regardless of role. */
+  granted_modules: ModuleKey[];
 }
 
 export const AUTH_COOKIE = 'token';

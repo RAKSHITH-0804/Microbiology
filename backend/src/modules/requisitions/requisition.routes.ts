@@ -30,12 +30,11 @@ const idParams = z.object({ id: z.coerce.number().int().positive('Invalid requis
 router.use(requireAuth);
 router.get(
   '/',
-  requireRequisitionBrowse,
-  requireModule('requisitions'),
+  requireRequisitionBrowse('requisitions'),
   validate({ query: listRequisitionsQuery }),
   asyncHandler(listRequisitions),
 );
-router.get('/pending', requireRequisitionBrowse, requireModule('pending_worklist'), asyncHandler(listPendingRequisitions));
+router.get('/pending', requireRequisitionBrowse('pending_worklist'), asyncHandler(listPendingRequisitions));
 router.get(
   '/status-search',
   requireModule('status_timeline'),
@@ -52,7 +51,6 @@ router.get(
 router.post(
   '/',
   requireRequisitionEntry,
-  requireModule('new_requisition'),
   validate({ body: createRequisitionSchema }),
   asyncHandler(createRequisition),
 );
@@ -60,14 +58,12 @@ router.post(
 router.put(
   '/:id',
   requireRequisitionEdit,
-  requireModule('requisitions', 'pending_worklist'),
   validate({ params: idParams, body: createRequisitionSchema }),
   asyncHandler(updateRequisition),
 );
 router.patch(
   '/:id/payment',
   requireRevenueAccess,
-  requireModule('billing'),
   validate({ params: idParams, body: updatePaymentSchema }),
   asyncHandler(updatePayment),
 );

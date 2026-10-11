@@ -44,10 +44,9 @@ export function ReportPrintLayout({
       {draft ? (
         // position: fixed repeats the watermark on every printed page.
         <div aria-hidden className="pointer-events-none fixed inset-0 z-0 flex items-center justify-center">
-          <div className="-rotate-[35deg] text-center font-sans font-bold uppercase leading-tight text-black/[0.09]">
-            <p className="text-[72pt] tracking-[0.15em]">Draft</p>
-            <p className="text-[20pt] tracking-[0.1em]">Not for medico-legal purposes</p>
-          </div>
+          <p className="-rotate-[35deg] font-sans text-[96pt] font-bold uppercase tracking-[0.15em] text-black/[0.09]">
+            Draft
+          </p>
         </div>
       ) : (
         <MicroscopeWatermark />

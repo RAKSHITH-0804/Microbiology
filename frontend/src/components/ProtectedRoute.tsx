@@ -3,7 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
-import { CHANGE_PASSWORD_PATH, hasModule, MODULE_DISABLED_MESSAGE } from '@/layout/navigation';
+import { CHANGE_PASSWORD_PATH, hasGrant, hasModule, MODULE_DISABLED_MESSAGE } from '@/layout/navigation';
 import type { ModuleKey, UserRole } from '@/types/auth';
 
 interface Props {
@@ -36,7 +36,9 @@ export default function ProtectedRoute({ roles, modules, deniedMessage = 'You do
   if (user.mustChangePassword && location.pathname !== CHANGE_PASSWORD_PATH) {
     return <Navigate to={CHANGE_PASSWORD_PATH} replace state={{ from: location }} />;
   }
-  if (roles && !roles.includes(user.role)) return <AccessDenied message={deniedMessage} />;
+  if (roles && !roles.includes(user.role) && !hasGrant(user, ...(modules ?? []))) {
+    return <AccessDenied message={deniedMessage} />;
+  }
   if (modules?.length && !hasModule(user, ...modules)) return <AccessDenied message={MODULE_DISABLED_MESSAGE} />;
 
   return <Outlet />;

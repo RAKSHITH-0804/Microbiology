@@ -60,7 +60,7 @@ export function ReportPageFrame({ step, title, labNo, loading, error, onRetry, c
   );
 }
 
-export const DRAFT_PRINT_TITLE = 'DRAFT REPORT - NOT FOR MEDICO-LEGAL PURPOSES';
+export const DRAFT_PRINT_TITLE = 'DRAFT REPORT';
 export const DRAFT_PRINT_HINT = 'Not yet verified: prints as a watermarked draft without names or signatures';
 export const NOTHING_TO_PRINT_MESSAGE = 'Save the report before printing a draft';
 

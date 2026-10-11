@@ -28,6 +28,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FormField } from '@/components/FormField';
 import { useAuth } from '@/context/AuthContext';
 import { createUser, deleteUser, fetchUsers, fieldErrors, resetUserPassword, setUserActive } from '@/features/admin/api';
+import { NOTIFICATIONS_CHANGED } from '@/features/notifications/api';
 import { fetchStaff } from '@/features/reports/api';
 import { getErrorMessage } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/format';
@@ -613,6 +614,10 @@ export default function UsersPage() {
   }, [users, term]);
   const activeCount = users.filter((u) => u.is_active).length;
   const resetRequests = users.filter((u) => u.password_reset_requested).length;
+
+  useEffect(() => {
+    window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED));
+  }, [resetRequests]);
 
   const toggle = async (target: AppUser, isActive: boolean) => {
     setToggling(target.id);

@@ -54,15 +54,22 @@ export const CHANGE_PASSWORD_PATH = '/change-password';
 const SUPER_ADMIN_ONLY: UserRole[] = ['SUPER_ADMIN'];
 const SUPER_ADMIN_DENIED = 'Access restricted: This module is managed by the Super Admin.';
 
-/** True unless the Super Admin switched every one of `modules` off for this user. */
+/** True when the user can open at least one of `modules`. */
 export function hasModule(user: User | null, ...modules: ModuleKey[]): boolean {
-  return !!user && modules.some((m) => !user.disabledModules.includes(m));
+  return !!user && modules.some((m) => user.modules.includes(m));
 }
 
-/** Role allows it and (when it is a switchable module) the per-user switch is on. */
+/** True when one of `modules` was granted to the user beyond their role. */
+export const hasGrant = (user: User | null, ...modules: ModuleKey[]): boolean =>
+  !!user && modules.some((m) => user.grantedModules.includes(m));
+
+/**
+ * Mirrors requireAccess on the API: the role holds the capability or the Super Admin granted one of
+ * `modules` explicitly, and (when modules are given) one of them is switched on.
+ */
 export function canUse(user: User | null, roles: UserRole[] | undefined, ...modules: ModuleKey[]): boolean {
   if (!user) return false;
-  if (roles && !roles.includes(user.role)) return false;
+  if (roles && !roles.includes(user.role) && !hasGrant(user, ...modules)) return false;
   return modules.length === 0 || hasModule(user, ...modules);
 }
 

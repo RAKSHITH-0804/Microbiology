@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireModule, requireRole } from '../../middleware/auth';
+import { requireAccess, requireAuth, requireModule } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
@@ -15,15 +15,19 @@ const router = Router();
 
 router.use(requireAuth);
 router.get('/', requireModule('reports'), validate({ query: listReportsQuery }), asyncHandler(listReports));
-router.get('/unverified', requireRole('DOCTOR', 'HOD'), requireModule('verification'), asyncHandler(listUnverifiedReports));
+const verifiers = requireAccess(['DOCTOR', 'HOD'], ['verification'], 'Access denied: Reports are verified by doctors');
+router.get('/unverified', verifiers, asyncHandler(listUnverifiedReports));
 // Reports are entered from the worklist and corrected during verification.
-const reportAuthors = [requireRole('LAB_TECH', 'DOCTOR', 'HOD'), requireModule('pending_worklist', 'verification')];
-router.post('/general', ...reportAuthors, validate({ body: generalReportSchema }), asyncHandler(saveGeneralReport));
-router.post('/antibiogram', ...reportAuthors, validate({ body: antibiogramReportSchema }), asyncHandler(saveAntibiogramReport));
+const reportAuthors = requireAccess(
+  ['LAB_TECH', 'DOCTOR', 'HOD'],
+  ['pending_worklist', 'verification'],
+  'Access denied: Reports are entered by lab technicians and doctors',
+);
+router.post('/general', reportAuthors, validate({ body: generalReportSchema }), asyncHandler(saveGeneralReport));
+router.post('/antibiogram', reportAuthors, validate({ body: antibiogramReportSchema }), asyncHandler(saveAntibiogramReport));
 router.post(
   '/:type/:id/verify',
-  requireRole('DOCTOR', 'HOD'),
-  requireModule('verification'),
+  verifiers,
   validate({ params: verifyReportParams }),
   asyncHandler(verifyReport),
 );

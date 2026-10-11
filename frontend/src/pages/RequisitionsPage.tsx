@@ -26,13 +26,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { StatusPill } from '@/components/reports/StatusPill';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
 import { PaymentActionButton } from '@/components/requisitions/PaymentActionButton';
+import { PatientDetails, SampleBadge } from '@/components/requisitions/PatientCells';
 import { ReportStaff } from '@/components/requisitions/ReportStaff';
 import { UpdatePaymentDialog } from '@/components/requisitions/UpdatePaymentDialog';
 import { TablePagination } from '@/components/TablePagination';
 import { fetchRequisitions } from '@/features/requisitions/api';
 import { formatRupees, isNoCounterPayment, PAYMENT_STATUS_META, paymentModeLabel } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
-import { formatAge, formatDateTime, formatSex } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import { useFilterParams } from '@/lib/useFilterParams';
 import { useAuth } from '@/context/AuthContext';
 import { canUse, REQUISITION_EDIT_ROLES, REQUISITION_ENTRY_ROLES, REVENUE_ROLES } from '@/layout/navigation';
@@ -280,32 +281,30 @@ export default function RequisitionsPage() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1280px] text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead>
                 <tr className="border-b bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <th className="px-4 py-2.5">Lab No</th>
-                  <th className="px-4 py-2.5">Receipt No</th>
-                  <th className="px-4 py-2.5">Patient Name</th>
-                  <th className="px-4 py-2.5">Age / Sex</th>
-                  <th className="px-4 py-2.5">Sample Nature</th>
-                  <th className="px-4 py-2.5">Received On</th>
-                  <th className="px-4 py-2.5">Status</th>
-                  <th className="px-4 py-2.5">Prepared / Reported By</th>
-                  <th className="px-4 py-2.5">Payment</th>
-                  <th className="px-4 py-2.5 text-right">Actions</th>
+                  <th className="px-3 py-2.5">Lab / Receipt No</th>
+                  <th className="px-3 py-2.5">Patient Details</th>
+                  <th className="px-3 py-2.5">Specimen / Sample</th>
+                  <th className="px-3 py-2.5">Received On</th>
+                  <th className="px-3 py-2.5">Prepared / Reported By</th>
+                  <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5">Payment</th>
+                  <th className="px-3 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className={cn('divide-y', loading && data && 'opacity-60')}>
                 {loading && !data && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
                       <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading requisitions...
                     </td>
                   </tr>
                 )}
                 {data && data.items.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                       <Inbox className="mx-auto mb-2 h-8 w-8 text-slate-300" />
                       {hasFilters
                         ? 'No requisitions match these filters.'
@@ -318,25 +317,25 @@ export default function RequisitionsPage() {
                 {data?.items.map((r) => {
                   const locked = isLocked(r);
                   return (
-                    <tr key={r.id} className="hover:bg-slate-50/70">
-                      <td className="whitespace-nowrap px-4 py-3 font-mono font-semibold text-slate-900">{r.lab_no}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">{r.receipt_no || '-'}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-slate-900">{r.patient.name}</p>
-                        {r.patient.phone && <p className="text-xs text-slate-500">{r.patient.phone}</p>}
+                    <tr key={r.id} className="align-top hover:bg-slate-50/70">
+                      <td className="whitespace-nowrap px-3 py-3">
+                        <p className="font-mono font-semibold text-slate-900">{r.lab_no}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">Receipt {r.receipt_no || '-'}</p>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {formatAge(r.patient)} / {formatSex(r.patient.sex)}
+                      <td className="min-w-[10rem] px-3 py-3">
+                        <PatientDetails patient={r.patient} />
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{r.sample_nature || '-'}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDateTime(r.sample_received_datetime)}</td>
-                      <td className="px-4 py-3">
-                        <StatusPill status={r.status} />
+                      <td className="max-w-[11rem] px-3 py-3">
+                        <SampleBadge sample={r.sample_nature} />
                       </td>
-                      <td className="min-w-[11rem] px-4 py-3">
+                      <td className="px-3 py-3 text-slate-600">{formatDateTime(r.sample_received_datetime)}</td>
+                      <td className="min-w-[10rem] px-3 py-3">
                         <ReportStaff preparedBy={r.prepared_by_name} reportedBy={r.reported_by_name} />
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3">
+                      <td className="px-3 py-3">
+                        <StatusPill status={r.status} />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3">
                         <PaymentStatusBadge status={r.payment_status} />
                         {r.payment_status === 'HOSPITAL_CREDIT' ? (
                           <p className="mt-1 text-xs tabular-nums text-slate-500">{formatRupees(r.total_amount)} billed</p>
@@ -352,8 +351,8 @@ export default function RequisitionsPage() {
                           <p className="text-xs text-slate-400">{paymentModeLabel(r.payment_mode)}</p>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-2">
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap justify-end gap-2">
                           {canManagePayments && (
                             <PaymentActionButton
                               label="Payment"

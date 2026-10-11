@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { query } from '../config/db';
 import { AppError } from './errorHandler';
 import { AUTH_COOKIE, AuthUser, JwtPayload, UserRole, verifyToken } from '../utils/jwt';
-import type { ModuleKey } from '../modules/permissions/permission.modules';
+import { ModuleKey, MODULE_OVERRIDES_SQL, resolveModules } from '../modules/permissions/permission.modules';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -15,10 +15,6 @@ declare global {
 
 export const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
 export const MODULE_DISABLED = 'MODULE_DISABLED';
-
-/** Column expression listing the module keys switched off for the user whose id is `userIdSql`. */
-export const DISABLED_MODULES_SQL = (userIdSql: string) =>
-  `ARRAY(SELECT p.module_key::text FROM user_permissions p WHERE p.user_id = ${userIdSql} AND NOT p.is_enabled ORDER BY p.module_key) AS disabled_modules`;
 
 /** The Super Admin signs in with fixed credentials and is never sent to the first-login password change. */
 export const mustChangePasswordFor = (role: UserRole, flag: boolean) => role !== 'SUPER_ADMIN' && flag;
@@ -52,9 +48,10 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
       is_active: boolean;
       password_changed_at: Date | null;
       must_change_password: boolean;
+      enabled_modules: string[];
       disabled_modules: string[];
     }>(
-      `SELECT role, staff_id, is_active, password_changed_at, must_change_password, ${DISABLED_MODULES_SQL('users.id')}
+      `SELECT role, staff_id, is_active, password_changed_at, must_change_password, ${MODULE_OVERRIDES_SQL('users.id')}
        FROM users WHERE id = $1`,
       [payload.sub],
     );
@@ -69,12 +66,14 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
         new AppError(403, 'You must change your temporary password before continuing.', { code: PASSWORD_CHANGE_REQUIRED }),
       );
     }
+    const { modules, granted } = resolveModules(user.role, user.enabled_modules, user.disabled_modules);
     req.user = {
       ...payload,
       role: user.role,
       staff_id: user.staff_id,
       must_change_password: mustChangePassword,
-      disabled_modules: user.role === 'SUPER_ADMIN' ? [] : user.disabled_modules,
+      modules,
+      granted_modules: granted,
     };
     return next();
   } catch (err) {
@@ -95,48 +94,72 @@ export function restrictTo(roles: readonly UserRole[], message = 'You do not hav
   };
 }
 
-/**
- * Passes when at least one of `modules` is still switched on for the user. Role guards decide whether
- * a role may use a module at all; this only applies the Super Admin's per-user switches on top.
- */
+const moduleDisabled = () => new AppError(403, 'Module access disabled by Super Admin', { code: MODULE_DISABLED });
+
+/** Passes when the user can open at least one of `modules` (role default or granted, and not switched off). */
 export function requireModule(...modules: ModuleKey[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) return next(new AppError(401, 'Authentication required'));
-    const disabled = req.user.disabled_modules;
-    if (modules.every((m) => disabled.includes(m))) {
-      return next(new AppError(403, 'Module access disabled by Super Admin', { code: MODULE_DISABLED }));
-    }
+    if (!modules.some((m) => req.user!.modules.includes(m))) return next(moduleDisabled());
     return next();
   };
 }
 
-/** Master data, user accounts and the audit trail belong to the system administrator alone. */
-export const requireSuperAdmin = restrictTo(
-  ['SUPER_ADMIN'],
-  'Access denied: This module is restricted to the Super Admin',
-);
+/**
+ * Role-gated module access. `roles` hold the capability by default; any other role gets it only when the
+ * Super Admin explicitly granted one of `modules` to that user. Either way one of `modules` must be on.
+ */
+export function requireAccess(roles: readonly UserRole[], modules: readonly ModuleKey[], message: string) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const user = req.user;
+    if (!user) return next(new AppError(401, 'Authentication required'));
+    if (!roles.includes(user.role) && !modules.some((m) => user.granted_modules.includes(m))) {
+      return next(new AppError(403, message));
+    }
+    if (!modules.some((m) => user.modules.includes(m))) return next(moduleDisabled());
+    return next();
+  };
+}
+
+const SUPER_ADMIN_MESSAGE = 'Access denied: This module is restricted to the Super Admin';
+
+/** The permission matrix itself is never delegated, so access can always be taken back. */
+export const requireSuperAdmin = restrictTo(['SUPER_ADMIN'], SUPER_ADMIN_MESSAGE);
+
+/** Master data, user accounts and the audit trail: the Super Admin, or staff the Super Admin granted the module. */
+export const requireAdminModule = (module: 'master_data' | 'users' | 'audit_logs') =>
+  requireAccess(['SUPER_ADMIN'], [module], SUPER_ADMIN_MESSAGE);
+
+/** True for the Super Admin and for users granted `module` beyond their role. */
+export const holdsAdminModule = (user: AuthUser, module: ModuleKey) =>
+  user.role === 'SUPER_ADMIN' || user.granted_modules.includes(module);
 
 /** Registering requisitions is desk work; doctors only report on them. */
-export const requireRequisitionEntry = restrictTo(
+export const requireRequisitionEntry = requireAccess(
   ['SUPER_ADMIN', 'HOD', 'LAB_TECH', 'CLERK'],
+  ['new_requisition'],
   'Access denied: Doctors cannot create or modify requisition records',
 );
 
-/** Clerks register new samples but cannot alter them afterwards. */
-export const requireRequisitionEdit = restrictTo(
+/** Clerks register new samples but cannot alter them afterwards. Edits open from the worklist or the directory. */
+export const requireRequisitionEdit = requireAccess(
   ['SUPER_ADMIN', 'HOD', 'LAB_TECH'],
+  ['requisitions', 'pending_worklist'],
   'Access denied: You cannot modify existing requisition records',
 );
 
 /** The worklist and requisition directory are clinical working views; clerks only register samples. */
-export const requireRequisitionBrowse = restrictTo(
-  ['SUPER_ADMIN', 'HOD', 'LAB_TECH', 'DOCTOR'],
-  'Access denied: You do not have access to the requisition directory',
-);
+export const requireRequisitionBrowse = (module: 'requisitions' | 'pending_worklist') =>
+  requireAccess(
+    ['SUPER_ADMIN', 'HOD', 'LAB_TECH', 'DOCTOR'],
+    [module],
+    'Access denied: You do not have access to the requisition directory',
+  );
 
 /** Billing data (collections, dues, patient ledgers) is for administrators and desk staff, not reporting doctors. */
 export const REVENUE_ROLES: readonly UserRole[] = ['SUPER_ADMIN', 'HOD', 'LAB_TECH'];
-export const requireRevenueAccess = restrictTo(
+export const requireRevenueAccess = requireAccess(
   REVENUE_ROLES,
+  ['billing'],
   'Access Denied: Revenue module is restricted to administrative and desk staff',
 );

@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FormField } from '@/components/FormField';
 import { SearchableSelect, type SearchableOption } from '@/components/SearchableSelect';
+import { AntibiogramSensitivityGrid } from '@/components/reports/AntibiogramSensitivityGrid';
 import { NothingToPrintNotice, ReportActionBar, ReportPageFrame } from '@/components/reports/ReportPageFrame';
 import { ReportPrintLayout } from '@/components/reports/ReportPrintLayout';
 import { RequisitionSummaryCard } from '@/components/reports/RequisitionSummaryCard';
@@ -405,34 +406,7 @@ export default function AntibiogramReportPage() {
             </tbody>
           </table>
 
-          <p className="mb-2 mt-4 font-bold underline underline-offset-2">Antibiotic Sensitivity Pattern</p>
-          <table className="w-full border-collapse border border-black text-[10.5pt]">
-            <thead>
-              <tr>
-                <th className="w-[9%] border border-black px-2 py-1 text-center">Sl. No</th>
-                <th className="border border-black px-2 py-1 text-left">Antibiotic</th>
-                {SENSITIVITY_OPTIONS.map((o) => (
-                  <th key={o.value} className="w-[16%] border border-black px-2 py-1 text-center">
-                    {o.label}
-                    <br />({o.short})
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {orderedResults.map((r, i) => (
-                <tr key={r.antibiotic_name}>
-                  <td className="border border-black px-2 py-[3px] text-center">{i + 1}</td>
-                  <td className="border border-black px-2 py-[3px]">{r.antibiotic_name}</td>
-                  {SENSITIVITY_OPTIONS.map((o) => (
-                    <td key={o.value} className="border border-black px-2 py-[3px] text-center font-bold">
-                      {r.sensitivity_result === o.value ? '\u2713' : ''}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <AntibiogramSensitivityGrid results={orderedResults} draft={draft} remark={values.grams_stain_remark} />
         </ReportPrintLayout>
       )}
     </>

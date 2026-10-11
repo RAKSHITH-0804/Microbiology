@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { LogOut, Menu, Microscope, Settings, X } from 'lucide-react';
+import { NotificationBell } from '@/components/layout/NotificationBell';
 import { useAuth } from '@/context/AuthContext';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
 import { ROLE_LABELS } from '@/types/auth';
@@ -102,6 +103,7 @@ export default function AppLayout() {
           <h1 className="hidden text-sm font-medium text-slate-500 sm:block">Department of Microbiology</h1>
 
           <div className="ml-auto flex items-center gap-4">
+            {user && <NotificationBell />}
             <div className="text-right leading-tight">
               <p className="text-sm font-medium text-slate-800">{user?.name}</p>
               <p className="text-xs text-slate-500">{user && (user.designation ?? ROLE_LABELS[user.role])}</p>

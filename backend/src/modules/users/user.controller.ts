@@ -4,6 +4,7 @@ import { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
+import { resolveNotifications } from '../notifications/notification.service';
 import { CreateUserInput, DEFAULT_STAFF_PASSWORD, ResetPasswordInput, UserStatusInput } from './user.schema';
 
 const BCRYPT_ROUNDS = 10;
@@ -125,6 +126,13 @@ async function insertStaff(client: PoolClient, actorId: number, input: CreateUse
 /** Roles the system cannot run without: removing the last active account would lock everyone out of it. */
 const ESSENTIAL_ROLES: Record<string, string> = { SUPER_ADMIN: 'Super Admin', HOD: 'HOD' };
 
+/** Staff granted the Users module manage staff accounts only; Super Admin accounts stay with the Super Admin. */
+function assertCanManage(req: Request, targetRole: string) {
+  if (targetRole === 'SUPER_ADMIN' && req.user!.role !== 'SUPER_ADMIN') {
+    throw new AppError(403, 'Only the Super Admin can change Super Admin accounts');
+  }
+}
+
 async function assertNotLastActive(client: PoolClient, id: number, role: string) {
   const label = ESSENTIAL_ROLES[role];
   if (!label) return;
@@ -145,11 +153,13 @@ export async function setUserStatus(req: Request, res: Response) {
     );
     const target = rows[0];
     if (!target) throw new AppError(404, 'User not found');
+    assertCanManage(req, target.role);
 
     if (!is_active && target.is_active) await assertNotLastActive(client, id, target.role);
 
     if (target.is_active !== is_active) {
       await client.query('UPDATE users SET is_active = $2 WHERE id = $1', [id, is_active]);
+      if (!is_active) await resolveNotifications(client, 'PASSWORD_RESET', 'users', id);
       await writeAuditLog(
         {
           userId: req.user!.sub,
@@ -197,6 +207,7 @@ export async function resetUserPassword(req: Request, res: Response) {
        WHERE id = $1`,
       [id, hash],
     );
+    await resolveNotifications(client, 'PASSWORD_RESET', 'users', id);
     await writeAuditLog(
       {
         userId: req.user!.sub,
@@ -236,12 +247,14 @@ export async function deleteUser(req: Request, res: Response) {
     );
     const target = rows[0];
     if (!target) throw new AppError(404, 'User not found');
+    assertCanManage(req, target.role);
     if (target.has_clinical_records) {
       throw new AppError(400, 'Cannot delete user with existing clinical records. Disable the account instead.');
     }
     if (target.is_active) await assertNotLastActive(client, id, target.role);
 
     await client.query('DELETE FROM users WHERE id = $1', [id]);
+    await resolveNotifications(client, 'PASSWORD_RESET', 'users', id);
 
     // The staff record goes too unless another account still uses it; it has no report ties (checked above).
     let staffDeleted = false;

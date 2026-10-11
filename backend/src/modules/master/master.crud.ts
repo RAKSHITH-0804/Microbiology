@@ -2,7 +2,7 @@ import { Request, Response, Router } from 'express';
 import { PoolClient } from 'pg';
 import { z, ZodTypeAny } from 'zod';
 import { query, withTransaction } from '../../config/db';
-import { requireSuperAdmin } from '../../middleware/auth';
+import { holdsAdminModule, requireAdminModule } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
@@ -108,7 +108,9 @@ export function registerMasterCrud(router: Router) {
       validate({ query: listQuery }),
       asyncHandler(async (req: Request, res: Response) => {
         const includeInactive = req.query.include_inactive === 'true';
-        if (includeInactive && req.user!.role !== 'SUPER_ADMIN') throw new AppError(403, 'Only the Super Admin can view deactivated entries');
+        if (includeInactive && !holdsAdminModule(req.user!, 'master_data')) {
+          throw new AppError(403, 'Only Master Data administrators can view deactivated entries');
+        }
         const { rows } = await query(`${select} ${includeInactive ? '' : 'WHERE is_active'} ORDER BY ${entity.orderBy}`);
         res.json({ success: true, data: rows });
       }),
@@ -116,7 +118,7 @@ export function registerMasterCrud(router: Router) {
 
     router.post(
       `/${entity.path}`,
-      requireSuperAdmin,
+      requireAdminModule('master_data'),
       validate({ body: createSchema }),
       asyncHandler(async (req: Request, res: Response) => {
         const values = req.body as Record<string, unknown>;
@@ -140,7 +142,7 @@ export function registerMasterCrud(router: Router) {
 
     router.put(
       `/${entity.path}/:id`,
-      requireSuperAdmin,
+      requireAdminModule('master_data'),
       validate({ params: idParams, body: updateSchema }),
       asyncHandler(async (req: Request, res: Response) => {
         const id = Number(req.params.id);
@@ -180,7 +182,7 @@ export function registerMasterCrud(router: Router) {
 
     router.delete(
       `/${entity.path}/:id`,
-      requireSuperAdmin,
+      requireAdminModule('master_data'),
       validate({ params: idParams }),
       asyncHandler(async (req: Request, res: Response) => {
         const id = Number(req.params.id);
