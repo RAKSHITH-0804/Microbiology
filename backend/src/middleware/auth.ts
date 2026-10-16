@@ -15,6 +15,14 @@ declare global {
 
 export const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
 export const MODULE_DISABLED = 'MODULE_DISABLED';
+export const SESSION_IDLE = 'SESSION_IDLE';
+
+/** Two minutes beyond the client's 15-minute idle sign-out, which shows a warning first. */
+export const SESSION_IDLE_LIMIT_SECONDS = 17 * 60;
+/** last_seen_at is written at most this often per user. */
+const LAST_SEEN_WRITE_SECONDS = 60;
+/** Sent by automatic requests (notification polling): checked for idleness but not counted as activity. */
+export const BACKGROUND_REQUEST_HEADER = 'X-Background-Request';
 
 /** The Super Admin signs in with fixed credentials and is never sent to the first-login password change. */
 export const mustChangePasswordFor = (role: UserRole, flag: boolean) => role !== 'SUPER_ADMIN' && flag;
@@ -50,8 +58,10 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
       must_change_password: boolean;
       enabled_modules: string[];
       disabled_modules: string[];
+      idle_seconds: number | null;
     }>(
-      `SELECT role, staff_id, is_active, password_changed_at, must_change_password, ${MODULE_OVERRIDES_SQL('users.id')}
+      `SELECT role, staff_id, is_active, password_changed_at, must_change_password, ${MODULE_OVERRIDES_SQL('users.id')},
+              EXTRACT(EPOCH FROM NOW() - last_seen_at)::float8 AS idle_seconds
        FROM users WHERE id = $1`,
       [payload.sub],
     );
@@ -59,6 +69,15 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
     if (!user?.is_active) return next(new AppError(401, 'Your account is disabled. Contact the administrator.'));
     if (user.password_changed_at && (payload.iat ?? 0) < Math.floor(user.password_changed_at.getTime() / 1000)) {
       return next(new AppError(401, 'Your password was changed. Please log in again.'));
+    }
+    if (user.idle_seconds !== null && user.idle_seconds > SESSION_IDLE_LIMIT_SECONDS) {
+      return next(
+        new AppError(401, 'You were signed out due to inactivity. Please log in again.', { code: SESSION_IDLE }),
+      );
+    }
+    const background = req.get(BACKGROUND_REQUEST_HEADER) === '1';
+    if (!background && (user.idle_seconds === null || user.idle_seconds > LAST_SEEN_WRITE_SECONDS)) {
+      await query('UPDATE users SET last_seen_at = NOW() WHERE id = $1', [payload.sub]);
     }
     const mustChangePassword = mustChangePasswordFor(user.role, user.must_change_password);
     if (enforcePasswordChange && mustChangePassword) {
@@ -163,3 +182,7 @@ export const requireRevenueAccess = requireAccess(
   ['billing'],
   'Access Denied: Revenue module is restricted to administrative and desk staff',
 );
+
+/** The requireRevenueAccess rule, for responses that carry billing-only detail. */
+export const hasRevenueAccess = (user: AuthUser) =>
+  (REVENUE_ROLES.includes(user.role) || user.granted_modules.includes('billing')) && user.modules.includes('billing');

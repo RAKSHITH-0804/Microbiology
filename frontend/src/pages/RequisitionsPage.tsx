@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
+  Ban,
   CheckCircle2,
   ChevronDown,
   CircleDashed,
@@ -30,10 +32,13 @@ import { PatientDetails, SampleBadge } from '@/components/requisitions/PatientCe
 import { ReportStaff } from '@/components/requisitions/ReportStaff';
 import { UpdatePaymentDialog } from '@/components/requisitions/UpdatePaymentDialog';
 import { TablePagination } from '@/components/TablePagination';
-import { fetchRequisitions } from '@/features/requisitions/api';
-import { formatRupees, isNoCounterPayment, PAYMENT_STATUS_META, paymentModeLabel } from '@/features/requisitions/payment';
+import { CancelledBadge } from '@/components/requisitions/CancelledNotice';
+import { ReasonDialog } from '@/components/ReasonDialog';
+import { cancelRequisition, fetchRequisitions } from '@/features/requisitions/api';
+import { isNoCounterPayment, PAYMENT_STATUS_META, paymentModeLabel } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
+import { formatPaise } from '@/lib/money';
 import { useFilterParams } from '@/lib/useFilterParams';
 import { useAuth } from '@/context/AuthContext';
 import { canUse, REQUISITION_EDIT_ROLES, REQUISITION_ENTRY_ROLES, REVENUE_ROLES } from '@/layout/navigation';
@@ -140,7 +145,10 @@ export default function RequisitionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<PendingRequisition | null>(null);
   const { user } = useAuth();
+  const isHod = user?.role === 'HOD';
+  const canCancel = isHod || user?.role === 'SUPER_ADMIN';
   const canManagePayments = canUse(user, REVENUE_ROLES, 'billing');
   const canEditRequisitions = canUse(user, REQUISITION_EDIT_ROLES, 'requisitions', 'pending_worklist');
   const canRegister = canUse(user, REQUISITION_ENTRY_ROLES, 'new_requisition');
@@ -316,6 +324,8 @@ export default function RequisitionsPage() {
                 )}
                 {data?.items.map((r) => {
                   const locked = isLocked(r);
+                  const cancelled = !!r.cancelled_at;
+                  const canEditThis = !locked || isHod;
                   return (
                     <tr key={r.id} className="align-top hover:bg-slate-50/70">
                       <td className="whitespace-nowrap px-3 py-3">
@@ -334,16 +344,21 @@ export default function RequisitionsPage() {
                       </td>
                       <td className="px-3 py-3">
                         <StatusPill status={r.status} />
+                        {r.cancelled_at && (
+                          <div className="mt-1" title={r.cancel_reason ?? undefined}>
+                            <CancelledBadge />
+                          </div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-3">
                         <PaymentStatusBadge status={r.payment_status} />
                         {r.payment_status === 'HOSPITAL_CREDIT' ? (
-                          <p className="mt-1 text-xs tabular-nums text-slate-500">{formatRupees(r.total_amount)} billed</p>
+                          <p className="mt-1 text-xs tabular-nums text-slate-500">{formatPaise(r.total_amount_paise)} billed</p>
                         ) : (
                           r.payment_status !== 'EXEMPT' &&
-                          r.total_amount > 0 && (
+                          r.total_amount_paise > 0 && (
                             <p className="mt-1 text-xs tabular-nums text-slate-500">
-                              {formatRupees(r.paid_amount)} / {formatRupees(r.total_amount)}
+                              {formatPaise(r.paid_amount_paise)} / {formatPaise(r.total_amount_paise)}
                             </p>
                           )
                         )}
@@ -353,29 +368,44 @@ export default function RequisitionsPage() {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap justify-end gap-2">
-                          {canManagePayments && (
+                          {canManagePayments && !cancelled && (
                             <PaymentActionButton
                               label="Payment"
                               status={r.payment_status}
                               locked={locked}
-                              canOverride={user?.role === 'HOD'}
+                              canOverride={isHod}
                               onClick={() => setPaymentTarget({ ...r, patient_name: r.patient.name, is_verified: locked })}
                             />
                           )}
                           {canEditRequisitions &&
-                            (locked ? (
+                            !cancelled &&
+                            (canEditThis ? (
+                              <Button
+                                asChild
+                                size="sm"
+                                variant="outline"
+                                title={
+                                  locked
+                                    ? 'Verified: changes to patient or sample details will send the report back for re-verification'
+                                    : 'Edit requisition'
+                                }
+                              >
+                                <Link to={`/requisition/edit/${r.id}`}>
+                                  <Pencil /> Edit Requisition
+                                </Link>
+                              </Button>
+                            ) : (
                               <span title="Verified requisitions are locked and cannot be edited">
                                 <Button size="sm" variant="outline" disabled>
                                   <Lock /> Locked
                                 </Button>
                               </span>
-                            ) : (
-                              <Button asChild size="sm" variant="outline" title="Edit requisition">
-                                <Link to={`/requisition/edit/${r.id}`}>
-                                  <Pencil /> Edit Requisition
-                                </Link>
-                              </Button>
                             ))}
+                          {canCancel && !cancelled && (!locked || isHod) && (
+                            <Button size="sm" variant="outline" className="text-red-700" onClick={() => setCancelTarget(r)}>
+                              <Ban /> Cancel
+                            </Button>
+                          )}
                           <ViewReportsMenu r={r} />
                         </div>
                       </td>
@@ -399,6 +429,26 @@ export default function RequisitionsPage() {
       </Card>
 
       <UpdatePaymentDialog requisition={paymentTarget} onClose={() => setPaymentTarget(null)} onSaved={load} />
+      <ReasonDialog
+        open={!!cancelTarget}
+        title="Cancel Requisition"
+        description={
+          cancelTarget && (
+            <>
+              <span className="font-mono font-semibold text-foreground">{cancelTarget.lab_no}</span> - {cancelTarget.patient.name}
+            </>
+          )
+        }
+        warning="The requisition stays on record but leaves the worklists and can no longer be edited, billed or reported. This cannot be undone."
+        confirmLabel="Cancel Requisition"
+        placeholder="e.g. Sample rejected: haemolysed, recollection requested"
+        onClose={() => setCancelTarget(null)}
+        onConfirm={async (reason) => {
+          const res = await cancelRequisition(cancelTarget!.id, reason);
+          toast.success(res.message ?? 'Requisition cancelled');
+          load();
+        }}
+      />
     </div>
   );
 }

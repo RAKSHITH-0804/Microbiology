@@ -26,11 +26,15 @@ export const corsOptions: CorsOptions = {
   maxAge: 600,
 };
 
+/** The automated test suite makes far more requests from one address than any user would. */
+const skipInTests = () => env.NODE_ENV === 'test';
+
 /** Counts only failed logins (4xx/5xx), so staff who sign in correctly are never locked out. */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 5,
   skipSuccessfulRequests: true,
+  skip: skipInTests,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { success: false, message: 'Too many failed login attempts. Please try again after 15 minutes.' },
@@ -48,7 +52,21 @@ export const passwordResetLimiter = rateLimit({
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 150,
+  skip: skipInTests,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { success: false, message: 'Too many requests. Please slow down and try again in a minute.' },
+});
+
+/**
+ * Patient billing lookups, per signed-in user (mount after requireAuth): enough for desk work,
+ * too few to walk through the patient register by name or phone number.
+ */
+export const ledgerLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  keyGenerator: (req) => `user:${req.user?.sub ?? 'anonymous'}`,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many patient ledger searches. Please wait a minute and try again.' },
 });

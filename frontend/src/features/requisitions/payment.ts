@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { paiseToRupeeInput, rupeesToPaise } from '@/lib/money';
 import { PAYMENT_MODES, type PaymentMode, type PaymentPayload, type PaymentStatus } from '@/types/requisition';
 
-/** Mirrors the server rule; the server re-derives the status and rejects a mismatch. */
+/** Mirrors the server rule (amounts in paise); the server re-derives the status and rejects a mismatch. */
 export function derivePaymentStatus(total: number, paid: number, mode: PaymentMode | null): PaymentStatus {
   if (mode === 'HOSPITAL_CREDIT') return 'HOSPITAL_CREDIT';
   if (mode === 'EXEMPT') return 'EXEMPT';
@@ -60,28 +61,41 @@ export type PaymentFormValues = {
 /** Most counter payments are cash, so new bills start on it. */
 export const EMPTY_PAYMENT: PaymentFormValues = { total_amount: '', paid_amount: '', payment_mode: 'CASH', exempt_referred_by: '' };
 
-const toAmount = (v: string) => (AMOUNT_PATTERN.test(v.trim()) ? Number(v) : 0);
+const toPaise = (v: string) => rupeesToPaise(v) ?? 0;
 const toMode = (v: string) => (PAYMENT_MODES.some((m) => m.value === v) ? (v as PaymentMode) : null);
 
+/** The API payload for the form: amounts converted to integer paise. */
 export function computePayment(v: PaymentFormValues): PaymentPayload {
-  const total = toAmount(v.total_amount);
-  const paid = toAmount(v.paid_amount);
+  const total = toPaise(v.total_amount);
+  const paid = toPaise(v.paid_amount);
   const mode = toMode(v.payment_mode);
   return {
-    total_amount: total,
-    paid_amount: paid,
+    total_amount_paise: total,
+    paid_amount_paise: paid,
     payment_mode: mode,
     payment_status: derivePaymentStatus(total, paid, mode),
     exempt_referred_by: mode === 'EXEMPT' ? v.exempt_referred_by.trim() || null : null,
   };
 }
 
-export function checkPaymentForm(v: PaymentFormValues, ctx: z.RefinementCtx) {
-  const { total_amount: total, paid_amount: paid, payment_mode: mode, exempt_referred_by } = computePayment(v);
+/** Form field for a server error key; the API names amounts `*_paise`. */
+export const paymentFormKey = (key: string) => key.replace(/_paise$/, '');
+
+/** Mirrors the server: lowering a fully paid bill needs a reason. Amounts in paise. */
+export const lowersPaidBill = (
+  before: { payment_status: PaymentStatus; total_amount_paise: number; paid_amount_paise: number },
+  after: PaymentPayload,
+) =>
+  before.payment_status === 'PAID' &&
+  (after.paid_amount_paise < before.paid_amount_paise || after.total_amount_paise < before.total_amount_paise);
+
+/** `referralOnRecord`: the exemption authority is stored but hidden from this user, and the server keeps it. */
+export function checkPaymentForm(v: PaymentFormValues, ctx: z.RefinementCtx, referralOnRecord = false) {
+  const { total_amount_paise: total, paid_amount_paise: paid, payment_mode: mode, exempt_referred_by } = computePayment(v);
   if (mode !== 'EXEMPT' && total <= 0) {
     ctx.addIssue({ code: 'custom', path: ['total_amount'], message: 'Enter the total amount' });
   }
-  if (mode === 'EXEMPT' && !exempt_referred_by) {
+  if (mode === 'EXEMPT' && !exempt_referred_by && !referralOnRecord) {
     ctx.addIssue({ code: 'custom', path: ['exempt_referred_by'], message: 'Enter who referred or authorised the exemption' });
   }
   if (paid > total) {
@@ -95,14 +109,13 @@ export function checkPaymentForm(v: PaymentFormValues, ctx: z.RefinementCtx) {
 export const paymentFormSchema = z.object(paymentFormFields).superRefine(checkPaymentForm);
 
 export function paymentFormFrom(
-  p: Pick<PaymentPayload, 'total_amount' | 'paid_amount' | 'payment_mode' | 'payment_status' | 'exempt_referred_by'>,
+  p: Pick<PaymentPayload, 'total_amount_paise' | 'paid_amount_paise' | 'payment_mode' | 'payment_status' | 'exempt_referred_by'>,
 ): PaymentFormValues {
-  const fmt = (n: number) => (n ? String(n) : '');
   // Older exempt bills were saved without a mode; reopen them as Exempt so a save doesn't mark them Unpaid.
   const mode = p.payment_mode ?? (p.payment_status === 'EXEMPT' ? 'EXEMPT' : '');
   return {
-    total_amount: fmt(p.total_amount),
-    paid_amount: fmt(p.paid_amount),
+    total_amount: paiseToRupeeInput(p.total_amount_paise),
+    paid_amount: paiseToRupeeInput(p.paid_amount_paise),
     payment_mode: mode,
     exempt_referred_by: p.exempt_referred_by ?? '',
   };
@@ -129,5 +142,6 @@ export function sanitizeAmountInput(raw: string) {
   return rest.length ? `${int}.${rest.join('').slice(0, 2)}` : int;
 }
 
+/** Formats a rupee value; API amounts are paise and use `formatPaise` instead. */
 export const formatRupees = (n: number) =>
   `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

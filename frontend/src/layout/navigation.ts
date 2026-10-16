@@ -73,6 +73,9 @@ export function canUse(user: User | null, roles: UserRole[] | undefined, ...modu
   return modules.length === 0 || hasModule(user, ...modules);
 }
 
+/** Billing roles, or a billing grant; mirrors hasRevenueAccess on the API. */
+export const canSeeBilling = (user: User | null) => canUse(user, REVENUE_ROLES, 'billing');
+
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: '/', icon: LayoutDashboard, end: true, alsoActiveFor: ['/dashboard'] },
   {

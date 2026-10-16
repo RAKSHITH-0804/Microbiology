@@ -17,13 +17,21 @@ export const PAYMENT_MODES = [
 ] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number]['value'];
 
+/** Amounts are integer paise (Rs 150.50 = 15050). */
 export interface PaymentPayload {
-  total_amount: number;
-  paid_amount: number;
+  total_amount_paise: number;
+  paid_amount_paise: number;
   payment_mode: PaymentMode | null;
   payment_status: PaymentStatus;
   /** Who referred or authorised a fee exemption; null for other modes. */
   exempt_referred_by: string | null;
+}
+
+/** Cancellation of a requisition; all null while it is active. */
+export interface CancellationInfo {
+  cancelled_at: string | null;
+  cancel_reason: string | null;
+  cancelled_by_name: string | null;
 }
 
 /** What the Update Payment dialog needs, from either the directory or the revenue ledger. */
@@ -31,8 +39,8 @@ export interface PaymentTarget {
   id: number;
   lab_no: string;
   patient_name: string;
-  total_amount: number;
-  paid_amount: number;
+  total_amount_paise: number;
+  paid_amount_paise: number;
   payment_mode: PaymentMode | null;
   payment_status: PaymentStatus;
   exempt_referred_by: string | null;
@@ -69,6 +77,8 @@ export interface RequisitionTestInput {
 }
 
 export interface CreateRequisitionPayload extends PaymentPayload {
+  /** Edits only: why a verified or fully paid bill is being changed. */
+  billing_reason?: string | null;
   address: string | null;
   patient: {
     name: string;
@@ -111,13 +121,15 @@ export interface UpdatedRequisition {
   status: RequisitionStatus;
   payment_status: PaymentStatus;
   patient_id: number;
+  /** The HOD changed details printed on a verified report, so it awaits verification again. */
+  verification_reset: boolean;
 }
 
 export interface RequisitionTest extends RequisitionTestInput {
   template_test_name: string | null;
 }
 
-export interface PendingRequisition {
+export interface PendingRequisition extends CancellationInfo {
   id: number;
   lab_no: string;
   receipt_no: string | null;
@@ -135,8 +147,8 @@ export interface PendingRequisition {
   sample_received_datetime: string;
   created_at: string;
   address: string | null;
-  total_amount: number;
-  paid_amount: number;
+  total_amount_paise: number;
+  paid_amount_paise: number;
   payment_status: PaymentStatus;
   payment_mode: PaymentMode | null;
   exempt_referred_by: string | null;
@@ -172,6 +184,7 @@ export interface StatusSearchResult {
   sample_received_datetime: string;
   status: RequisitionStatus;
   payment_status: PaymentStatus;
+  cancelled_at: string | null;
 }
 
 export interface RequisitionListParams {
@@ -224,7 +237,7 @@ export interface TimelineReport {
   verified_by_name: string | null;
 }
 
-export interface RequisitionTimeline {
+export interface RequisitionTimeline extends CancellationInfo {
   id: number;
   lab_no: string;
   status: RequisitionStatus;
@@ -234,7 +247,7 @@ export interface RequisitionTimeline {
   payment_status: PaymentStatus;
   payment_mode: PaymentMode | null;
   exempt_referred_by: string | null;
-  total_amount: number;
-  paid_amount: number;
+  total_amount_paise: number;
+  paid_amount_paise: number;
   reports: TimelineReport[];
 }

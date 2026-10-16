@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, FileWarning, Loader2, Printer, Save } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, FileWarning, Loader2, Printer, Save, ShieldOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { canUse, REQUISITION_BROWSE_ROLES } from '@/layout/navigation';
@@ -97,14 +97,24 @@ interface ReportActionBarProps {
   /** Unverified: printing produces a draft without names or signatures. */
   draft: boolean;
   onPrint: () => void;
+  /** Shown while the form is editable, e.g. the HOD correcting a verified report. */
+  notice?: string | null;
+  /** HOD only: sends a verified report back for re-verification. */
+  onRevoke?: () => void;
 }
 
-export function ReportActionBar({ saving, readOnly, readOnlyMessage, draft, onPrint }: ReportActionBarProps) {
+export function ReportActionBar({ saving, readOnly, readOnlyMessage, draft, onPrint, notice, onRevoke }: ReportActionBarProps) {
+  const message = readOnly ? readOnlyMessage : (notice ?? null);
   return (
     <div className="sticky -bottom-6 z-20 -mx-6 -mb-6 border-t bg-white/95 backdrop-blur">
       <div className="flex flex-wrap items-center justify-end gap-3 px-6 py-3">
-        {readOnly && readOnlyMessage && <p className="mr-auto text-sm text-amber-700">{readOnlyMessage}</p>}
-        {draft && <DraftBadge className={cn(!(readOnly && readOnlyMessage) && 'mr-auto')} />}
+        {message && <p className="mr-auto text-sm text-amber-700">{message}</p>}
+        {draft && <DraftBadge className={cn(!message && 'mr-auto')} />}
+        {onRevoke && (
+          <Button type="button" variant="outline" className="text-red-700" onClick={onRevoke} disabled={saving}>
+            <ShieldOff /> Revoke Verification
+          </Button>
+        )}
         <Button type="button" variant="outline" onClick={onPrint} disabled={saving}>
           <Printer /> {draft ? 'Print Draft Report' : 'Print Report'}
         </Button>

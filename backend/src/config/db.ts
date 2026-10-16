@@ -1,5 +1,12 @@
-import { Pool, PoolClient, QueryResultRow } from 'pg';
+import { Pool, PoolClient, QueryResultRow, types } from 'pg';
 import { env } from './env';
+
+// int8 (COUNT(*), amounts in paise) as JS numbers; refuse values that a double cannot hold exactly.
+types.setTypeParser(types.builtins.INT8, (value) => {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n)) throw new Error(`int8 value ${value} is outside the safe integer range`);
+  return n;
+});
 
 export const pool = new Pool({
   host: env.DB_HOST,

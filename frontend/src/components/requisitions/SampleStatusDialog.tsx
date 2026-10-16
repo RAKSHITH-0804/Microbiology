@@ -4,15 +4,18 @@ import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fetchRequisitionTimeline } from '@/features/requisitions/api';
+import { CancelledNotice } from '@/components/requisitions/CancelledNotice';
+import { useAuth } from '@/context/AuthContext';
+import { canSeeBilling } from '@/layout/navigation';
 import {
   EXEMPT_REFERRAL_LABEL,
-  formatRupees,
   isNoCounterPayment,
   isReleasedForReporting,
   paymentModeLabel,
 } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
+import { formatPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
 import type { RequisitionTimeline, TimelineReport } from '@/types/requisition';
 
@@ -55,7 +58,7 @@ function ReportLine({ report, children }: { report: TimelineReport; children: Re
   );
 }
 
-function buildSteps(t: RequisitionTimeline): Step[] {
+function buildSteps(t: RequisitionTimeline, showReferral: boolean): Step[] {
   const paid = isReleasedForReporting(t.payment_status);
   const drafted = t.reports.length > 0;
   const unverified = t.reports.filter((r) => !r.is_verified);
@@ -85,12 +88,12 @@ function buildSteps(t: RequisitionTimeline): Step[] {
             {mode && !isNoCounterPayment(t.payment_mode) && <Badge>{mode}</Badge>}
           </div>
           {t.payment_status === 'EXEMPT' ? (
-            <Who label={EXEMPT_REFERRAL_LABEL} name={t.exempt_referred_by} />
+            showReferral && <Who label={EXEMPT_REFERRAL_LABEL} name={t.exempt_referred_by} />
           ) : t.payment_status === 'HOSPITAL_CREDIT' ? (
-            <p className="text-slate-600">{formatRupees(t.total_amount)} billed to the hospital</p>
+            <p className="text-slate-600">{formatPaise(t.total_amount_paise)} billed to the hospital</p>
           ) : (
             <p className="text-slate-600">
-              {formatRupees(t.paid_amount)} paid of {formatRupees(t.total_amount)}
+              {formatPaise(t.paid_amount_paise)} paid of {formatPaise(t.total_amount_paise)}
             </p>
           )}
           {!paid && <p className="text-amber-700">Reports can be entered once the bill is settled.</p>}
@@ -207,7 +210,7 @@ function Timeline({ steps }: { steps: Step[] }) {
 
 /** Horizontal overview of the five steps, for wide layouts above the detailed timeline. */
 export function SampleProgressBar({ timeline }: { timeline: RequisitionTimeline }) {
-  const steps = buildSteps(timeline);
+  const steps = buildSteps(timeline, false);
   return (
     <ol className="grid grid-cols-5 gap-1" aria-label="Lifecycle progress">
       {steps.map((step, i) => {
@@ -266,6 +269,7 @@ export function SampleTimelineBody({
   error: string | null;
   onRetry?: () => void;
 }) {
+  const showReferral = canSeeBilling(useAuth().user);
   if (error) {
     return (
       <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -286,5 +290,10 @@ export function SampleTimelineBody({
       </div>
     );
   }
-  return <Timeline steps={buildSteps(timeline)} />;
+  return (
+    <>
+      <CancelledNotice info={timeline} className="mb-4" />
+      <Timeline steps={buildSteps(timeline, showReferral)} />
+    </>
+  );
 }

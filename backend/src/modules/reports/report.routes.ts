@@ -1,15 +1,24 @@
 import { Router } from 'express';
-import { requireAccess, requireAuth, requireModule } from '../../middleware/auth';
+import { requireAccess, requireAuth, requireModule, restrictTo } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
   listReports,
   listUnverifiedReports,
+  logReportPrint,
+  revokeVerification,
   saveAntibiogramReport,
   saveGeneralReport,
   verifyReport,
 } from './report.controller';
-import { antibiogramReportSchema, generalReportSchema, listReportsQuery, verifyReportParams } from './report.schema';
+import {
+  antibiogramReportSchema,
+  generalReportSchema,
+  listReportsQuery,
+  printLogParams,
+  revokeVerificationSchema,
+  verifyReportParams,
+} from './report.schema';
 
 const router = Router();
 
@@ -31,5 +40,12 @@ router.post(
   validate({ params: verifyReportParams }),
   asyncHandler(verifyReport),
 );
+router.post(
+  '/:type/:id/revoke',
+  restrictTo(['HOD'], 'Only the HOD can revoke a verification'),
+  validate({ params: verifyReportParams, body: revokeVerificationSchema }),
+  asyncHandler(revokeVerification),
+);
+router.post('/:type/:requisitionId/print-log', validate({ params: printLogParams }), asyncHandler(logReportPrint));
 
 export default router;

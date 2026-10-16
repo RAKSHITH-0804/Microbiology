@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { query } from '../../config/db';
 import { UserRole } from '../../utils/jwt';
-import { assignedToDoctor, REQUISITION_SELECT } from '../requisitions/requisition.controller';
+import { assignedToDoctor, REQUISITION_SELECT, withVisibleReferral } from '../requisitions/requisition.controller';
 
 interface CountsRow {
   samples_today: string;
@@ -13,8 +13,9 @@ interface CountsRow {
 const DEPARTMENT_COUNTS = `
   SELECT
     (SELECT COUNT(*) FROM requisitions WHERE created_at >= date_trunc('day', NOW())) AS samples_today,
-    (SELECT COUNT(*) FROM requisitions WHERE status = 'RECEIVED' AND payment_status IN ('PAID', 'HOSPITAL_CREDIT', 'EXEMPT')) AS pending_reports,
-    (SELECT COUNT(*) FROM requisitions WHERE status = 'REPORT_ENTERED') AS awaiting_verification,
+    (SELECT COUNT(*) FROM requisitions
+     WHERE status = 'RECEIVED' AND payment_status IN ('PAID', 'HOSPITAL_CREDIT', 'EXEMPT') AND cancelled_at IS NULL) AS pending_reports,
+    (SELECT COUNT(*) FROM requisitions WHERE status = 'REPORT_ENTERED' AND cancelled_at IS NULL) AS awaiting_verification,
     (SELECT COUNT(*)
      FROM requisitions r
      WHERE r.status = 'VERIFIED'
@@ -29,12 +30,16 @@ const DOCTOR_COUNTS = `
     SELECT requisition_id, is_verified, verified_at FROM general_reports WHERE reported_by = $1
     UNION ALL
     SELECT requisition_id, is_verified, verified_at FROM antibiogram_reports WHERE reported_by = $1
+  ),
+  my_open AS (
+    SELECT m.* FROM my_reports m JOIN requisitions r ON r.id = m.requisition_id
+    WHERE NOT m.is_verified AND r.cancelled_at IS NULL
   )
   SELECT
     (SELECT COUNT(*) FROM requisitions r
      WHERE r.created_at >= date_trunc('day', NOW()) AND r.id IN (SELECT requisition_id FROM my_reports)) AS samples_today,
-    (SELECT COUNT(*) FROM my_reports WHERE NOT is_verified) AS pending_reports,
-    (SELECT COUNT(*) FROM my_reports WHERE NOT is_verified) AS awaiting_verification,
+    (SELECT COUNT(*) FROM my_open) AS pending_reports,
+    (SELECT COUNT(*) FROM my_open) AS awaiting_verification,
     (SELECT COUNT(*) FROM my_reports
      WHERE is_verified AND verified_at >= NOW() - INTERVAL '7 days') AS verified_this_week`;
 
@@ -132,7 +137,7 @@ export async function getDashboardStats(req: Request, res: Response) {
       pendingReports: Number(c.pending_reports),
       awaitingVerification: Number(c.awaiting_verification),
       verifiedThisWeek: Number(c.verified_this_week),
-      recentRequisitions: recent.rows,
+      recentRequisitions: withVisibleReferral(user, recent.rows),
       analytics,
     },
   });

@@ -31,6 +31,18 @@ export async function notifyUserManagers(client: PoolClient, n: NewNotification)
   return rowCount ?? 0;
 }
 
+/** Sends one notification to the active accounts linked to the given staff members (e.g. a reporting doctor). */
+export async function notifyStaff(client: PoolClient, staffIds: readonly (number | null)[], n: NewNotification) {
+  const ids = staffIds.filter((id): id is number => id !== null);
+  if (!ids.length) return 0;
+  const { rowCount } = await client.query(
+    `INSERT INTO notifications (recipient_id, type, title, message, link, entity_name, entity_id)
+     SELECT u.id, $2, $3, $4, $5, $6, $7 FROM users u WHERE u.is_active AND u.staff_id = ANY($1::int[])`,
+    [ids, n.type, n.title, n.message, n.link ?? null, n.entityName ?? null, n.entityId ?? null],
+  );
+  return rowCount ?? 0;
+}
+
 /** Marks every recipient's open notifications of `type` about one record as read, e.g. once a reset is issued. */
 export async function resolveNotifications(client: PoolClient, type: NotificationType, entityName: string, entityId: number) {
   await client.query(

@@ -28,7 +28,7 @@ export async function listAuditLogs(req: Request, res: Response) {
   if (q.to) add((p) => `a.created_at <= ${p}`, q.to);
   if (q.search) {
     add(
-      (p) => `(u.username ILIKE ${p} OR s.name ILIKE ${p} OR a.entity_name ILIKE ${p}
+      (p) => `(COALESCE(u.username, a.username) ILIKE ${p} OR s.name ILIKE ${p} OR a.entity_name ILIKE ${p}
                OR a.action ILIKE ${p} OR a.entity_id::text = TRIM(BOTH '%' FROM ${p}) OR a.details::text ILIKE ${p})`,
       `%${q.search}%`,
     );
@@ -39,7 +39,7 @@ export async function listAuditLogs(req: Request, res: Response) {
 
   const [items, total, facets] = await Promise.all([
     query(
-      `SELECT a.id, a.user_id, u.username, s.name AS staff_name, u.role, a.action, a.entity_name, a.entity_id,
+      `SELECT a.id, a.user_id, COALESCE(u.username, a.username) AS username, s.name AS staff_name, u.role, a.action, a.entity_name, a.entity_id,
               a.details, a.created_at
        ${from} ${where}
        ORDER BY a.created_at DESC, a.id DESC

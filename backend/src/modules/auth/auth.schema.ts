@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 export const loginSchema = z.object({
-  username: z.string().trim().min(1, 'Username is required').max(50),
+  // Wider than any real username so oversized attempts still reach the failed-login audit.
+  username: z.string().trim().min(1, 'Username is required').max(200),
   password: z.string().min(1, 'Password is required').max(128),
 });
 

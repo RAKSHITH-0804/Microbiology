@@ -19,7 +19,9 @@ const PAGE_SIZE = 25;
 
 const ACTION_TONE: Record<string, BadgeProps['tone']> = {
   LOGIN: 'slate',
+  LOGIN_FAILED: 'red',
   LOGOUT: 'slate',
+  PATIENT_LEDGER_SEARCH: 'violet',
   CREATE: 'blue',
   UPDATE: 'amber',
   VERIFY: 'emerald',
@@ -35,6 +37,10 @@ const ACTION_TONE: Record<string, BadgeProps['tone']> = {
   PASSWORD_CHANGE: 'slate',
   PASSWORD_RESET_REQUESTED: 'amber',
   PASSWORD_RESET: 'violet',
+  REPORT_VERIFICATION_REVOKED: 'red',
+  VERIFICATION_RESET: 'amber',
+  REQUISITION_CANCEL: 'red',
+  REPORT_PRINT: 'slate',
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -61,6 +67,16 @@ function describe(e: AuditLogEntry): string {
       return 'Signed in';
     case 'LOGOUT:users':
       return 'Signed out';
+    case 'LOGIN_FAILED:users': {
+      const reason = { unknown_user: 'unknown username', bad_password: 'wrong password', disabled: 'account disabled' }[
+        String(d.reason)
+      ];
+      return `Failed sign-in as "${e.username ?? ''}"${reason ? ` (${reason})` : ''}`;
+    }
+    case 'PATIENT_LEDGER_SEARCH:payments': {
+      const terms = [d.patient_name, d.phone_no].filter((t) => typeof t === 'string' && t).join(' / ');
+      return `Searched patient billing for "${terms}" - ${String(d.visits_found ?? 0)} visit(s) found`;
+    }
     case 'CREATE:users':
       return `Created user account "${String(d.username ?? '')}" (${String(d.role ?? '')})`;
     case 'ACTIVATE:users':
@@ -105,6 +121,19 @@ function describe(e: AuditLogEntry): string {
     case 'VERIFY:general_reports':
     case 'VERIFY:antibiogram_reports':
       return `Verified ${entityLabel(e.entity_name).toLowerCase()} for${lab}`;
+    case 'REPORT_VERIFICATION_REVOKED:general_reports':
+    case 'REPORT_VERIFICATION_REVOKED:antibiogram_reports':
+      return `Revoked verification of ${entityLabel(e.entity_name).toLowerCase()} for${lab}: "${String(d.reason ?? '')}"`;
+    case 'VERIFICATION_RESET:general_reports':
+    case 'VERIFICATION_RESET:antibiogram_reports':
+      return `Verification of ${entityLabel(e.entity_name).toLowerCase()} for${lab} reset after ${
+        d.trigger === 'requisition_edit' ? 'patient/sample details changed' : 'HOD correction'
+      }`;
+    case 'REQUISITION_CANCEL:requisitions':
+      return `Cancelled requisition${lab}: "${String(d.reason ?? '')}"`;
+    case 'REPORT_PRINT:general_reports':
+    case 'REPORT_PRINT:antibiogram_reports':
+      return `Printed ${d.draft ? 'draft ' : ''}${entityLabel(e.entity_name).toLowerCase()} for${lab}`;
     default: {
       const verb = { CREATE: 'Added', UPDATE: 'Updated', DEACTIVATE: 'Deactivated', RESTORE: 'Restored' }[e.action] ?? e.action;
       const name = d.organism_name ?? d.antibiotic_name ?? d.sample_name ?? d.finding_text ?? d.username ?? d.name;

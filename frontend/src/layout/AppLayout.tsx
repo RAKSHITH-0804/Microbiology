@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { LogOut, Menu, Microscope, Settings, X } from 'lucide-react';
 import { NotificationBell } from '@/components/layout/NotificationBell';
 import { useAuth } from '@/context/AuthContext';
+import { api } from '@/lib/api';
 import { useIdleTimeout } from '@/lib/useIdleTimeout';
 import { ROLE_LABELS } from '@/types/auth';
 import { canSeeNavItem, NAV_ITEMS } from './navigation';
@@ -35,7 +36,13 @@ export default function AppLayout() {
     }
   }, [logout, navigate, pathname]);
 
-  useIdleTimeout(!!user, handleIdleTimeout);
+  const sendHeartbeat = useCallback(() => {
+    api.post('/auth/heartbeat').catch(() => {
+      // A rejected heartbeat (idle or expired session) is handled by the auth interceptor.
+    });
+  }, []);
+
+  useIdleTimeout(!!user, handleIdleTimeout, sendHeartbeat);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden print:block print:h-auto print:w-auto print:overflow-visible">

@@ -4,7 +4,7 @@ import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { Bug, FlaskConical, Info, Search, X } from 'lucide-react';
+import { Bug, ClipboardPen, FlaskConical, Info, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -17,8 +17,11 @@ import { AntibiogramSensitivityGrid } from '@/components/reports/AntibiogramSens
 import { NothingToPrintNotice, ReportActionBar, ReportPageFrame } from '@/components/reports/ReportPageFrame';
 import { ReportPrintLayout } from '@/components/reports/ReportPrintLayout';
 import { RequisitionSummaryCard } from '@/components/reports/RequisitionSummaryCard';
+import { RevokeVerificationDialog } from '@/components/reports/RevokeVerificationDialog';
 import { SignatoryFields } from '@/components/reports/SignatoryFields';
+import { CancelledNotice } from '@/components/requisitions/CancelledNotice';
 import { fetchAntibiotics, fetchOrganisms, saveAntibiogramReport } from '@/features/reports/api';
+import { inheritedInvestigation, inheritedSpecimen } from '@/features/reports/inheritedFields';
 import { useReportAccess } from '@/features/reports/useReportAccess';
 import { useReportData } from '@/features/reports/useReportData';
 import { getErrorMessage } from '@/lib/api';
@@ -84,12 +87,13 @@ export default function AntibiogramReportPage() {
   const requisition = data?.requisition;
   const [organisms, antibiotics] = data?.extra ?? [[], []];
   const values = watch();
-  const { readOnly, readOnlyMessage, draft, printable, print } = useReportAccess({
-    loaded: !!requisition,
+  const { readOnly, readOnlyMessage, notice, draft, printable, print, canRevoke } = useReportAccess({
+    reportType: 'antibiogram',
+    requisition,
     report: requisition?.antibiogram_report,
-    requisitionVerified: requisition?.status === 'VERIFIED',
     isDirty,
   });
+  const [revokeOpen, setRevokeOpen] = useState(false);
   const resultsError = typeof errors.results?.message === 'string' ? errors.results.message : undefined;
 
   const organismOptions = useMemo<SearchableOption[]>(
@@ -133,8 +137,9 @@ export default function AntibiogramReportPage() {
       });
       updateRequisition((r) => ({
         ...r,
-        status: r.status === 'RECEIVED' ? 'REPORT_ENTERED' : r.status,
+        status: 'REPORT_ENTERED',
         antibiogram_report_id: saved.id,
+        antibiogram_report_verified: false,
         antibiogram_report: {
           id: saved.id,
           reporting_datetime: saved.reporting_datetime,
@@ -148,7 +153,11 @@ export default function AntibiogramReportPage() {
         },
       }));
       reset(v);
-      toast.success(`Antibiogram report saved - Lab No ${saved.lab_no}`);
+      if (saved.verification_reset) {
+        toast.success(`Antibiogram report corrected - Lab No ${saved.lab_no}`, {
+          description: 'Verification was reset and the reporting doctor has been notified to verify it again.',
+        });
+      } else toast.success(`Antibiogram report saved - Lab No ${saved.lab_no}`);
       return true;
     } catch (err) {
       const body = (err as { response?: { data?: { errors?: Record<string, string[]> } } }).response?.data;
@@ -179,10 +188,44 @@ export default function AntibiogramReportPage() {
       >
         {requisition && data && (
           <form noValidate onSubmit={onSave} className="space-y-5">
+            <CancelledNotice info={requisition} />
             <RequisitionSummaryCard
               requisition={requisition}
               reportingDateTime={requisition.antibiogram_report?.reporting_datetime ?? null}
             />
+
+            <Card>
+              <CardHeader className="flex-row items-center gap-2 space-y-0">
+                <ClipboardPen className="h-4 w-4 text-primary" />
+                <CardTitle>Report Details</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField label="Specimen" htmlFor="ab_specimen" hint="Locked to the requisition sample details">
+                    <Input
+                      id="ab_specimen"
+                      disabled
+                      readOnly
+                      aria-readonly="true"
+                      value={inheritedSpecimen(requisition)}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Investigation Done"
+                    htmlFor="ab_investigation_done"
+                    hint="Locked to the investigations selected at registration"
+                  >
+                    <Input
+                      id="ab_investigation_done"
+                      disabled
+                      readOnly
+                      aria-readonly="true"
+                      value={inheritedInvestigation(requisition)}
+                    />
+                  </FormField>
+                </div>
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader className="flex-row items-center gap-2 space-y-0">
@@ -369,10 +412,20 @@ export default function AntibiogramReportPage() {
               readOnlyMessage={readOnlyMessage}
               draft={draft}
               onPrint={print}
+              notice={notice}
+              onRevoke={canRevoke ? () => setRevokeOpen(true) : undefined}
             />
           </form>
         )}
       </ReportPageFrame>
+      <RevokeVerificationDialog
+        open={revokeOpen}
+        reportType="antibiogram"
+        reportId={requisition?.antibiogram_report?.id}
+        labNo={requisition?.lab_no}
+        onClose={() => setRevokeOpen(false)}
+        onRevoked={reload}
+      />
 
       {requisition && !printable && <NothingToPrintNotice />}
       {requisition && printable && (
@@ -389,7 +442,12 @@ export default function AntibiogramReportPage() {
               <tr>
                 <td className="w-[28%] py-1 align-top font-bold">Specimen</td>
                 <td className="w-[3%] py-1 align-top">:</td>
-                <td className="py-1 align-top">{requisition.sample_nature || '-'}</td>
+                <td className="py-1 align-top">{inheritedSpecimen(requisition) || '-'}</td>
+              </tr>
+              <tr>
+                <td className="py-1 align-top font-bold">Investigation Done</td>
+                <td className="py-1 align-top">:</td>
+                <td className="py-1 align-top">{inheritedInvestigation(requisition) || '-'}</td>
               </tr>
               <tr>
                 <td className="py-1 align-top font-bold">Organism Isolated</td>

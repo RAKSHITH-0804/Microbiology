@@ -34,6 +34,7 @@ export async function listUsers(_req: Request, res: Response) {
 
 export async function createUser(req: Request, res: Response) {
   const input = req.body as CreateUserInput;
+  assertCanAssignRole(req, input.role);
 
   const isNewStaff = input.staff_id === undefined;
 
@@ -133,6 +134,13 @@ function assertCanManage(req: Request, targetRole: string) {
   }
 }
 
+/** HOD accounts carry report verification, so only the Super Admin may create them or hand out their passwords. */
+function assertCanAssignRole(req: Request, role: string) {
+  if (role === 'HOD' && req.user!.role !== 'SUPER_ADMIN') {
+    throw new AppError(403, 'Only the Super Admin can create or reset HOD accounts');
+  }
+}
+
 async function assertNotLastActive(client: PoolClient, id: number, role: string) {
   const label = ESSENTIAL_ROLES[role];
   if (!label) return;
@@ -200,6 +208,7 @@ export async function resetUserPassword(req: Request, res: Response) {
     const target = rows[0];
     if (!target) throw new AppError(404, 'User not found');
     if (target.role === 'SUPER_ADMIN') throw new AppError(400, 'Super Admin credentials are fixed and cannot be reset here');
+    assertCanAssignRole(req, target.role);
 
     await client.query(
       `UPDATE users SET password_hash = $2, must_change_password = TRUE, password_changed_at = NOW(),

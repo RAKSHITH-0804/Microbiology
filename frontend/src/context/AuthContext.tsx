@@ -1,10 +1,13 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { api, ApiResponse } from '@/lib/api';
 import type { User } from '@/types/auth';
 
 /** Error code the API returns while the account is still on its temporary password. */
 const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
 const MODULE_DISABLED = 'MODULE_DISABLED';
+/** The server ended the session after 17 minutes without activity. */
+const SESSION_IDLE = 'SESSION_IDLE';
 
 interface AuthContextValue {
   user: User | null;
@@ -55,7 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (err) => {
         const url: string = err.config?.url ?? '';
         const status = err.response?.status;
-        if (status === 401 && !url.includes('/auth/')) setUser(null);
+        if (status === 401 && err.response?.data?.errors?.code === SESSION_IDLE) {
+          setUser(null);
+          toast.info('You were signed out due to inactivity.', {
+            id: SESSION_IDLE,
+            description: 'Sign in again to continue where you left off.',
+          });
+        } else if (status === 401 && !url.includes('/auth/')) setUser(null);
         if (status === 403 && err.response?.data?.errors?.code === PASSWORD_CHANGE_REQUIRED) {
           setUser((current) => (current && !current.mustChangePassword ? { ...current, mustChangePassword: true } : current));
         }

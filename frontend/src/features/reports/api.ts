@@ -8,6 +8,7 @@ import type {
   MasterStaff,
   ReportArchivePage,
   ReportArchiveParams,
+  ReportType,
   RequisitionDetail,
   SavedReport,
 } from '@/types/report';
@@ -30,4 +31,14 @@ export async function fetchReportArchive(params: ReportArchiveParams): Promise<R
 
 export async function saveAntibiogramReport(payload: AntibiogramReportPayload): Promise<SavedReport> {
   return (await api.post<ApiResponse<SavedReport>>('/reports/antibiogram', payload)).data.data;
+}
+
+/** HOD only: sends a verified report back to its reporting doctor. */
+export async function revokeVerification(type: ReportType, reportId: number, reason: string) {
+  return (await api.post<ApiResponse<{ lab_no: string }>>(`/reports/${type}/${reportId}/revoke`, { reason })).data;
+}
+
+/** Records a print in the audit trail; the server decides whether it was a draft. */
+export async function logReportPrint(type: ReportType, requisitionId: number) {
+  await api.post(`/reports/${type}/${requisitionId}/print-log`);
 }

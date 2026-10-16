@@ -7,10 +7,12 @@ import {
   requireRequisitionEdit,
   requireRequisitionEntry,
   requireRevenueAccess,
+  restrictTo,
 } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
+  cancelRequisition,
   createRequisition,
   getRequisition,
   getRequisitionTimeline,
@@ -21,7 +23,12 @@ import {
   updateRequisition,
 } from './requisition.controller';
 import { updatePaymentSchema } from './payment';
-import { createRequisitionSchema, listRequisitionsQuery, statusSearchQuery } from './requisition.schema';
+import {
+  cancelRequisitionSchema,
+  createRequisitionSchema,
+  listRequisitionsQuery,
+  statusSearchQuery,
+} from './requisition.schema';
 
 const router = Router();
 
@@ -66,6 +73,12 @@ router.patch(
   requireRevenueAccess,
   validate({ params: idParams, body: updatePaymentSchema }),
   asyncHandler(updatePayment),
+);
+router.post(
+  '/:id/cancel',
+  restrictTo(['SUPER_ADMIN', 'HOD'], 'Only the HOD or the Super Admin can cancel a requisition'),
+  validate({ params: idParams, body: cancelRequisitionSchema }),
+  asyncHandler(cancelRequisition),
 );
 
 export default router;

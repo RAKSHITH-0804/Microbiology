@@ -1,17 +1,28 @@
 import { Request, Response } from 'express';
 import { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db';
+import { hasRevenueAccess } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
 import { AuthUser } from '../../utils/jwt';
-import { assertRequisitionUnlocked, isRequisitionLocked } from '../../utils/reportLock';
+import { formatPaise, paise, rupeesParam } from '../../utils/money';
+import { assertNotCancelled, isRequisitionLocked, REPORT_LOCKED_MESSAGE } from '../../utils/reportLock';
+import { REPORT_TABLES, resetVerification, VerifiedReport } from '../reports/verification';
 import {
+  auditBilling,
+  Billing,
   billingFor,
+  lowersPaidBill,
   OVERRIDE_REASON_MIN,
   RELEASED_PAYMENT_STATUSES,
   UpdatePaymentInput,
 } from './payment';
-import { CreateRequisitionInput, ListRequisitionsQuery, StatusSearchQuery } from './requisition.schema';
+import {
+  CancelRequisitionInput,
+  CreateRequisitionInput,
+  ListRequisitionsQuery,
+  StatusSearchQuery,
+} from './requisition.schema';
 
 type PatientInput = CreateRequisitionInput['patient'];
 
@@ -93,7 +104,8 @@ export async function createRequisition(req: Request, res: Response) {
            clinical_diagnosis, preferred_antibiotics, antibiotics_used, sample_nature, site_of_collection,
            sample_collection_datetime, sample_received_datetime, status, created_by,
            address, total_amount, paid_amount, payment_status, payment_mode, exempt_referred_by
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15,$16,$17,$18,$19,$20,$21)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15,$16,
+                   ${rupeesParam('$17')},${rupeesParam('$18')},$19,$20,$21)
          RETURNING id, lab_no, status, payment_status, sample_received_datetime`,
         [
           input.lab_no,
@@ -112,8 +124,8 @@ export async function createRequisition(req: Request, res: Response) {
           receivedAt,
           userId,
           input.address,
-          billing.total_amount,
-          billing.paid_amount,
+          billing.total_amount_paise,
+          billing.paid_amount_paise,
           billing.payment_status,
           billing.payment_mode,
           billing.exempt_referred_by,
@@ -142,8 +154,8 @@ export async function createRequisition(req: Request, res: Response) {
             patient_id: patient.id,
             patient_created: patient.created,
             tests: input.requisition_tests.length,
-            total_amount: billing.total_amount,
-            paid_amount: billing.paid_amount,
+            total_amount: formatPaise(billing.total_amount_paise),
+            paid_amount: formatPaise(billing.paid_amount_paise),
             payment_status: billing.payment_status,
             payment_mode: billing.payment_mode,
             ...(billing.exempt_referred_by && { exempt_referred_by: billing.exempt_referred_by }),
@@ -187,11 +199,52 @@ const EDITABLE_COLUMNS = [
 ] as const;
 type EditableColumn = (typeof EDITABLE_COLUMNS)[number];
 
-/** NUMERIC comes back from pg as a string; read amounts as numbers so audit diffs compare like with like. */
+/** Amount columns are read and written as integer paise so edits compare exactly. */
 const AMOUNT_COLUMNS: readonly string[] = ['total_amount', 'paid_amount'];
-const selectColumn = (c: string) => (AMOUNT_COLUMNS.includes(c) ? `${c}::float8 AS ${c}` : c);
+const BILLING_COLUMNS: readonly EditableColumn[] = [
+  'total_amount',
+  'paid_amount',
+  'payment_status',
+  'payment_mode',
+  'exempt_referred_by',
+];
+const selectColumn = (c: string) => (AMOUNT_COLUMNS.includes(c) ? `${paise(c)} AS ${c}` : c);
+const assignColumn = (c: string, param: string) => `${c} = ${AMOUNT_COLUMNS.includes(c) ? rupeesParam(param) : param}`;
 
 const comparable = (v: unknown) => (v instanceof Date ? v.toISOString() : (v ?? null));
+/** How a changed value is written to the audit trail; amounts as rupee strings. */
+const auditValue = (c: string, v: unknown) =>
+  AMOUNT_COLUMNS.includes(c) && typeof v === 'number' ? formatPaise(v) : comparable(v);
+
+/** Patient and sample details printed on the report; changing them after verification needs re-verification. */
+const PRINTED_PATIENT_FIELDS = ['name', 'age_years', 'age_months', 'age_days', 'sex'] as const;
+
+/** Resets every verified report of a requisition, after the HOD changed details printed on them. */
+async function resetVerifiedReports(
+  client: PoolClient,
+  requisition: { id: number; lab_no: string },
+  actorId: number,
+  changes: Record<string, { from: unknown; to: unknown }>,
+) {
+  for (const table of Object.values(REPORT_TABLES)) {
+    const { rows } = await client.query<VerifiedReport>(
+      `SELECT id, reported_by, verified_by, verified_at FROM ${table}
+       WHERE requisition_id = $1 AND is_verified FOR UPDATE`,
+      [requisition.id],
+    );
+    for (const report of rows) {
+      await resetVerification(client, {
+        table,
+        report,
+        requisition,
+        actorId,
+        action: 'VERIFICATION_RESET',
+        details: { trigger: 'requisition_edit', changes },
+        message: `The HOD changed patient or sample details printed on the verified report for ${requisition.lab_no}. Please review and verify it again.`,
+      });
+    }
+  }
+}
 
 /**
  * Applies demographic edits to the requisition's patient. A patient row shared with other
@@ -227,22 +280,39 @@ export async function updateRequisition(req: Request, res: Response) {
   const input = req.body as CreateRequisitionInput;
   const userId = req.user!.sub;
   const hospital = input.hospital === 'Other' ? input.hospital_other : input.hospital;
-  const billing = billingFor(input);
 
   try {
     const result = await withTransaction(async (client) => {
-      const existing = await client.query<Record<EditableColumn, unknown> & { patient_id: number; status: string }>(
-        `SELECT patient_id, status, ${EDITABLE_COLUMNS.map(selectColumn).join(', ')} FROM requisitions WHERE id = $1 FOR UPDATE`,
+      const existing = await client.query<
+        Record<EditableColumn, unknown> & { patient_id: number; status: string; cancelled_at: Date | null }
+      >(
+        `SELECT patient_id, status, cancelled_at, ${EDITABLE_COLUMNS.map(selectColumn).join(', ')}
+         FROM requisitions WHERE id = $1 FOR UPDATE`,
         [id],
       );
       const before = existing.rows[0];
       if (!before) throw new AppError(404, 'Requisition not found');
-      await assertRequisitionUnlocked(client, id, before.status);
+      await assertDoctorAssigned(client, req.user!, id);
+      const beforeLabNo = before.lab_no as string;
+      assertNotCancelled({ lab_no: beforeLabNo, cancelled_at: before.cancelled_at });
+      // Only the HOD may correct a verified requisition; changes printed on the report reset its verification.
+      const locked = await isRequisitionLocked(client, id, before.status);
+      if (locked && req.user!.role !== 'HOD') throw new AppError(400, REPORT_LOCKED_MESSAGE);
+      // Staff without billing access never see the exemption authority, so an exempt bill keeps the stored one.
+      const keepReferral =
+        !hasRevenueAccess(req.user!) && input.payment_mode === 'EXEMPT' && !input.exempt_referred_by;
+      const billing = billingFor(keepReferral ? { ...input, exempt_referred_by: before.exempt_referred_by } : input);
 
       const dup = await client.query('SELECT 1 FROM requisitions WHERE LOWER(lab_no) = LOWER($1) AND id <> $2', [input.lab_no, id]);
       if (dup.rowCount) throw new AppError(409, `Lab No "${input.lab_no}" is already registered`, { lab_no: ['Lab No already exists'] });
 
       await assertTestsInCatalog(client, input.requisition_tests);
+      const patientBefore = (
+        await client.query<Record<(typeof PRINTED_PATIENT_FIELDS)[number], unknown>>(
+          `SELECT ${PRINTED_PATIENT_FIELDS.join(', ')} FROM patients WHERE id = $1`,
+          [before.patient_id],
+        )
+      ).rows[0];
       const patient = await applyPatientEdit(client, id, before.patient_id, input.patient);
 
       const after: Record<EditableColumn, unknown> = {
@@ -263,12 +333,33 @@ export async function updateRequisition(req: Request, res: Response) {
           ? input.sample_received_datetime
           : before.sample_received_datetime,
         address: input.address,
-        ...billing,
+        total_amount: billing.total_amount_paise,
+        paid_amount: billing.paid_amount_paise,
+        payment_status: billing.payment_status,
+        payment_mode: billing.payment_mode,
+        exempt_referred_by: billing.exempt_referred_by,
       };
+
+      const billingChanged = BILLING_COLUMNS.some((c) => comparable(before[c]) !== comparable(after[c]));
+      const billingBefore = {
+        payment_status: before.payment_status as string,
+        total_amount_paise: before.total_amount as number,
+        paid_amount_paise: before.paid_amount as number,
+      };
+      const needsBillingReason = (locked && billingChanged) || lowersPaidBill(billingBefore, billing);
+      if (needsBillingReason && (input.billing_reason?.length ?? 0) < OVERRIDE_REASON_MIN) {
+        throw new AppError(
+          400,
+          locked
+            ? 'An override reason is required to change the bill of a verified report'
+            : 'A reason is required to reduce the amount on a fully paid bill',
+          { billing_reason: [`Enter at least ${OVERRIDE_REASON_MIN} characters explaining the change`] },
+        );
+      }
 
       const { rows } = await client.query<{ id: number; lab_no: string; status: string; payment_status: string }>(
         `UPDATE requisitions
-         SET ${EDITABLE_COLUMNS.map((c, i) => `${c} = $${i + 3}`).join(', ')}, patient_id = $2
+         SET ${EDITABLE_COLUMNS.map((c, i) => assignColumn(c, `$${i + 3}`)).join(', ')}, patient_id = $2
          WHERE id = $1
          RETURNING id, lab_no, status, payment_status`,
         [id, patient.id, ...EDITABLE_COLUMNS.map((c) => after[c])],
@@ -287,7 +378,7 @@ export async function updateRequisition(req: Request, res: Response) {
       const changes = Object.fromEntries(
         EDITABLE_COLUMNS.filter((c) => comparable(before[c]) !== comparable(after[c])).map((c) => [
           c,
-          { from: comparable(before[c]), to: comparable(after[c]) },
+          { from: auditValue(c, before[c]), to: auditValue(c, after[c]) },
         ]),
       );
       const testKeys = (tests: { test_category: string; test_name: string }[]) =>
@@ -308,15 +399,38 @@ export async function updateRequisition(req: Request, res: Response) {
             patient_reassigned: patient.reassigned,
             tests_added: newTests.filter((t) => !oldTests.includes(t)),
             tests_removed: oldTests.filter((t) => !newTests.includes(t)),
+            ...(locked && { verified_requisition_edit: true }),
+            ...(needsBillingReason && { billing_reason: input.billing_reason }),
           },
         },
         client,
       );
 
-      return { ...rows[0], patient_id: patient.id };
+      const printedChanges: Record<string, { from: unknown; to: unknown }> = {};
+      for (const f of PRINTED_PATIENT_FIELDS) {
+        const from = patientBefore[f] ?? null;
+        const to = input.patient[f] ?? null;
+        if (from !== to) printedChanges[`patient_${f}`] = { from, to };
+      }
+      if (changes.sample_nature) printedChanges.sample_nature = changes.sample_nature;
+      const verificationReset = locked && Object.keys(printedChanges).length > 0;
+      if (verificationReset) await resetVerifiedReports(client, { id, lab_no: rows[0].lab_no }, userId, printedChanges);
+
+      return {
+        ...rows[0],
+        ...(verificationReset && { status: 'REPORT_ENTERED' }),
+        patient_id: patient.id,
+        verification_reset: verificationReset,
+      };
     });
 
-    res.json({ success: true, message: `Requisition ${result.lab_no} updated`, data: result });
+    res.json({
+      success: true,
+      message: result.verification_reset
+        ? `Requisition ${result.lab_no} updated; report verification was reset and the reporting doctor notified`
+        : `Requisition ${result.lab_no} updated`,
+      data: result,
+    });
   } catch (err) {
     if ((err as { constraint?: string }).constraint === 'requisitions_lab_no_key') {
       throw new AppError(409, `Lab No "${input.lab_no}" is already registered`, { lab_no: ['Lab No already exists'] });
@@ -337,8 +451,11 @@ export const REQUISITION_SELECT = `
          r.op_ip_no, r.ward_unit, r.clinical_diagnosis, r.preferred_antibiotics, r.antibiotics_used,
          r.sample_nature, r.site_of_collection,
          r.sample_collection_datetime, r.sample_received_datetime, r.created_at,
-         r.address, r.total_amount::float8 AS total_amount, r.paid_amount::float8 AS paid_amount,
+         r.address, ${paise('r.total_amount')} AS total_amount_paise, ${paise('r.paid_amount')} AS paid_amount_paise,
          r.payment_status, r.payment_mode, r.exempt_referred_by,
+         r.cancelled_at, r.cancel_reason,
+         (SELECT COALESCE(s.name, u.username) FROM users u LEFT JOIN master_staff s ON s.id = u.staff_id
+          WHERE u.id = r.cancelled_by) AS cancelled_by_name,
          json_build_object(
            'id', p.id, 'name', p.name, 'age_value', p.age_value,
            'age_unit', p.age_unit, 'age_years', p.age_years, 'age_months', p.age_months,
@@ -365,6 +482,10 @@ export const REQUISITION_SELECT = `
   FROM requisitions r
   JOIN patients p ON p.id = r.patient_id`;
 
+/** The exemption authority is billing detail: users without billing access get null. */
+export const withVisibleReferral = <T extends { exempt_referred_by?: unknown }>(user: AuthUser, rows: T[]): T[] =>
+  hasRevenueAccess(user) ? rows : rows.map((r) => ({ ...r, exempt_referred_by: null }));
+
 /** Requisitions with a report whose reporting doctor is the staff id bound to `param` (never matches NULL). */
 export const assignedToDoctor = (param: string) =>
   `(EXISTS (SELECT 1 FROM general_reports g WHERE g.requisition_id = r.id AND g.reported_by = ${param})
@@ -382,16 +503,18 @@ export async function listPendingRequisitions(req: Request, res: Response) {
     `${REQUISITION_SELECT}
      WHERE r.status IN ('RECEIVED', 'REPORT_ENTERED')
        AND r.payment_status = ANY($1::text[])
+       AND r.cancelled_at IS NULL
        ${doctorFilter}
      ORDER BY r.sample_received_datetime DESC, r.id DESC`,
     params,
   );
-  res.json({ success: true, data: rows });
+  res.json({ success: true, data: withVisibleReferral(req.user!, rows) });
 }
 
 /**
- * Settles or corrects billing. Once a report is verified only the HOD may change the bill,
- * with a written reason that is kept in the audit trail.
+ * Settles or corrects billing. Once a report is verified only the HOD may change the bill, and lowering
+ * a fully paid bill needs a written reason too; reasons are kept in the audit trail. Billing changes
+ * never affect report verification.
  */
 export async function updatePayment(req: Request, res: Response) {
   const id = Number(req.params.id);
@@ -399,48 +522,52 @@ export async function updatePayment(req: Request, res: Response) {
   const after = billingFor(input);
 
   const result = await withTransaction(async (client) => {
-    const existing = await client.query<{
-      lab_no: string;
-      status: string;
-      total_amount: number;
-      paid_amount: number;
-      payment_status: string;
-      payment_mode: string | null;
-      exempt_referred_by: string | null;
-    }>(
-      `SELECT lab_no, status, total_amount::float8 AS total_amount, paid_amount::float8 AS paid_amount,
+    const existing = await client.query<
+      Billing & { lab_no: string; status: string; cancelled_at: Date | null }
+    >(
+      `SELECT lab_no, status, cancelled_at,
+              ${paise('total_amount')} AS total_amount_paise, ${paise('paid_amount')} AS paid_amount_paise,
               payment_status, payment_mode, exempt_referred_by
        FROM requisitions WHERE id = $1 FOR UPDATE`,
       [id],
     );
     const before = existing.rows[0];
     if (!before) throw new AppError(404, 'Requisition not found');
+    await assertDoctorAssigned(client, req.user!, id);
+    assertNotCancelled(before);
     const override = await isRequisitionLocked(client, id, before.status);
-    if (override) {
-      if (req.user!.role !== 'HOD') {
-        throw new AppError(403, 'Only the HOD can modify payment details after report verification');
-      }
-      if ((input.reason?.length ?? 0) < OVERRIDE_REASON_MIN) {
-        throw new AppError(400, 'An override reason is required to change the bill of a verified report', {
-          reason: [`Enter at least ${OVERRIDE_REASON_MIN} characters explaining the change`],
-        });
-      }
+    if (override && req.user!.role !== 'HOD') {
+      throw new AppError(403, 'Only the HOD can modify payment details after report verification');
     }
 
+    const auditBefore = auditBilling(before);
+    const auditAfter = auditBilling(after);
     const changes = Object.fromEntries(
-      (Object.keys(after) as (keyof typeof after)[])
-        .filter((k) => (before[k] ?? null) !== (after[k] ?? null))
-        .map((k) => [k, { from: before[k] ?? null, to: after[k] ?? null }]),
+      (Object.keys(auditAfter) as (keyof typeof auditAfter)[])
+        .filter((k) => (auditBefore[k] ?? null) !== (auditAfter[k] ?? null))
+        .map((k) => [k, { from: auditBefore[k] ?? null, to: auditAfter[k] ?? null }]),
     );
     if (Object.keys(changes).length === 0) {
       return { id, lab_no: before.lab_no, ...after, changed: false };
     }
 
+    const reasonRequired = override || lowersPaidBill(before, after);
+    if (reasonRequired && (input.reason?.length ?? 0) < OVERRIDE_REASON_MIN) {
+      throw new AppError(
+        400,
+        override
+          ? 'An override reason is required to change the bill of a verified report'
+          : 'A reason is required to reduce the amount on a fully paid bill',
+        { reason: [`Enter at least ${OVERRIDE_REASON_MIN} characters explaining the change`] },
+      );
+    }
+
     await client.query(
       `UPDATE requisitions
-       SET total_amount = $2, paid_amount = $3, payment_status = $4, payment_mode = $5, exempt_referred_by = $6
+       SET total_amount = ${rupeesParam('$2')}, paid_amount = ${rupeesParam('$3')},
+           payment_status = $4, payment_mode = $5, exempt_referred_by = $6
        WHERE id = $1`,
-      [id, after.total_amount, after.paid_amount, after.payment_status, after.payment_mode, after.exempt_referred_by],
+      [id, after.total_amount_paise, after.paid_amount_paise, after.payment_status, after.payment_mode, after.exempt_referred_by],
     );
     await writeAuditLog(
       {
@@ -448,7 +575,7 @@ export async function updatePayment(req: Request, res: Response) {
         action: override ? 'VERIFIED_PAYMENT_OVERRIDE' : 'PAYMENT_UPDATE',
         entityName: 'requisitions',
         entityId: id,
-        details: { requisition_id: id, lab_no: before.lab_no, changes, ...(override && { reason: input.reason }) },
+        details: { requisition_id: id, lab_no: before.lab_no, changes, ...(reasonRequired && { reason: input.reason }) },
       },
       client,
     );
@@ -512,7 +639,7 @@ export async function listRequisitions(req: Request, res: Response) {
 
   res.json({
     success: true,
-    data: { items: items.rows, total, page: q.page, pageSize: q.pageSize, statusCounts },
+    data: { items: withVisibleReferral(req.user!, items.rows), total, page: q.page, pageSize: q.pageSize, statusCounts },
   });
 }
 
@@ -521,7 +648,7 @@ type ReportRow = { reported_by: number | null; [column: string]: unknown };
 export async function getRequisition(req: Request, res: Response) {
   const id = Number(req.params.id);
   const { rows } = await query(`${REQUISITION_SELECT} WHERE r.id = $1`, [id]);
-  const requisition = rows[0];
+  const [requisition] = withVisibleReferral(req.user!, rows);
   if (!requisition) throw new AppError(404, 'Requisition not found');
 
   const [general, antibiogram] = await Promise.all([
@@ -574,7 +701,10 @@ export async function getRequisitionTimeline(req: Request, res: Response) {
       `SELECT r.id, r.lab_no, r.status, p.name AS patient_name,
               r.sample_received_datetime AS received_at, COALESCE(s.name, u.username) AS received_by,
               r.payment_status, r.payment_mode, r.exempt_referred_by,
-              r.total_amount::float8 AS total_amount, r.paid_amount::float8 AS paid_amount
+              ${paise('r.total_amount')} AS total_amount_paise, ${paise('r.paid_amount')} AS paid_amount_paise,
+              r.cancelled_at, r.cancel_reason,
+              (SELECT COALESCE(cs.name, cu.username) FROM users cu LEFT JOIN master_staff cs ON cs.id = cu.staff_id
+               WHERE cu.id = r.cancelled_by) AS cancelled_by_name
        FROM requisitions r
        JOIN patients p ON p.id = r.patient_id
        LEFT JOIN users u ON u.id = r.created_by
@@ -594,7 +724,8 @@ export async function getRequisitionTimeline(req: Request, res: Response) {
   assertDoctorCanView(req.user!, reports.rows);
 
   const reportRows = reports.rows.map(({ reported_by: _reportedBy, ...r }) => r);
-  res.json({ success: true, data: { ...requisition.rows[0], reports: reportRows } });
+  const [timeline] = withVisibleReferral(req.user!, requisition.rows);
+  res.json({ success: true, data: { ...timeline, reports: reportRows } });
 }
 
 /** Finds samples for the Status Timeline page; without a term, lists the most recently received. */
@@ -614,7 +745,7 @@ export async function searchRequisitionStatus(req: Request, res: Response) {
 
   const { rows } = await query(
     `SELECT r.id, r.lab_no, r.receipt_no, p.name AS patient_name, r.sample_nature,
-            r.sample_received_datetime, r.status, r.payment_status
+            r.sample_received_datetime, r.status, r.payment_status, r.cancelled_at
      FROM requisitions r JOIN patients p ON p.id = r.patient_id
      ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
      ORDER BY r.sample_received_datetime DESC, r.id DESC
@@ -624,10 +755,71 @@ export async function searchRequisitionStatus(req: Request, res: Response) {
   res.json({ success: true, data: rows });
 }
 
+/**
+ * Closes a requisition that should not proceed (wrong patient, rejected sample, duplicate entry).
+ * The record and its audit history stay; it leaves the worklists and can no longer be changed.
+ * Once a report is verified only the HOD may cancel it.
+ */
+export async function cancelRequisition(req: Request, res: Response) {
+  const id = Number(req.params.id);
+  const { reason } = req.body as CancelRequisitionInput;
+
+  const result = await withTransaction(async (client) => {
+    const { rows } = await client.query<{ lab_no: string; status: string; payment_status: string; cancelled_at: Date | null }>(
+      'SELECT lab_no, status, payment_status, cancelled_at FROM requisitions WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    const requisition = rows[0];
+    if (!requisition) throw new AppError(404, 'Requisition not found');
+    if (requisition.cancelled_at) throw new AppError(409, `Requisition ${requisition.lab_no} is already cancelled`);
+    const verified = await isRequisitionLocked(client, id, requisition.status);
+    if (verified && req.user!.role !== 'HOD') {
+      throw new AppError(403, 'Only the HOD can cancel a requisition with a verified report');
+    }
+
+    const updated = await client.query<{ cancelled_at: Date }>(
+      `UPDATE requisitions SET cancelled_at = NOW(), cancelled_by = $2, cancel_reason = $3
+       WHERE id = $1 RETURNING cancelled_at`,
+      [id, req.user!.sub, reason],
+    );
+    await writeAuditLog(
+      {
+        userId: req.user!.sub,
+        action: 'REQUISITION_CANCEL',
+        entityName: 'requisitions',
+        entityId: id,
+        details: {
+          lab_no: requisition.lab_no,
+          reason,
+          status: requisition.status,
+          payment_status: requisition.payment_status,
+          had_verified_report: verified,
+        },
+      },
+      client,
+    );
+    return { id, lab_no: requisition.lab_no, cancelled_at: updated.rows[0].cancelled_at, cancel_reason: reason };
+  });
+
+  res.json({ success: true, message: `Requisition ${result.lab_no} cancelled`, data: result });
+}
+
 /** Doctors may only open a requisition when one of its reports names them as reporting doctor. */
 function assertDoctorCanView(user: AuthUser, reports: ({ reported_by: number | null } | null)[]) {
   if (user.role !== 'DOCTOR') return;
   if (!user.staff_id || !reports.some((r) => r?.reported_by === user.staff_id)) {
+    throw new AppError(403, 'Access denied: You can only view details for requisitions assigned to you');
+  }
+}
+
+/** Module grants can let a doctor edit or bill requisitions, but still only those assigned to them. */
+async function assertDoctorAssigned(client: PoolClient, user: AuthUser, requisitionId: number) {
+  if (user.role !== 'DOCTOR') return;
+  const { rows } = await client.query<{ assigned: boolean }>(
+    `SELECT ${assignedToDoctor('$2')} AS assigned FROM requisitions r WHERE r.id = $1`,
+    [requisitionId, user.staff_id ?? null],
+  );
+  if (!rows[0]?.assigned) {
     throw new AppError(403, 'Access denied: You can only view details for requisitions assigned to you');
   }
 }

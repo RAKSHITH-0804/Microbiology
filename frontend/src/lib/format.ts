@@ -9,7 +9,11 @@ interface AgeParts {
   age_days: number | null;
 }
 
-/** "2 Y", "3 M 10 D"; falls back to the single-unit age for records saved before the split fields existed. */
+/**
+ * Clean single-unit display when only one part is set (`25 Y`, `6 M`, `10 D`).
+ * Legacy composites with several non-zero parts still join as `3 M 10 D`.
+ * Falls back to age_value/age_unit for records saved before the split fields existed.
+ */
 export function formatAge(p: AgeParts): string {
   const hasParts = p.age_years !== null || p.age_months !== null || p.age_days !== null;
   if (!hasParts) return p.age_value !== null ? `${p.age_value} ${p.age_unit}` : '-';

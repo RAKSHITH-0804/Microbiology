@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query } from '../../config/db';
 import { writeAuditLog } from '../../utils/audit';
+import { paise, sumPaise } from '../../utils/money';
 import { PAYMENT_MODES } from '../requisitions/payment';
 import { LogExportInput, PatientLedgerQuery, PaymentHistoryQuery, PaymentSummaryQuery } from './payment.schema';
 
@@ -25,7 +26,7 @@ function buildFilters(q: PaymentSummaryQuery & { search?: string }) {
   if (q.paymentStatus) add((p) => `r.payment_status = ${p}`, q.paymentStatus);
   if (q.search) {
     add(
-      (p) => `(r.lab_no ILIKE ${p} OR p.name ILIKE ${p} OR p.phone ILIKE ${p})`,
+      (p) => `(r.lab_no ILIKE ${p} OR p.name ILIKE ${p} OR p.phone ILIKE ${p} OR r.exempt_referred_by ILIKE ${p})`,
       `%${q.search.replace(/[\\%_]/g, '\\$&')}%`,
     );
   }
@@ -33,17 +34,21 @@ function buildFilters(q: PaymentSummaryQuery & { search?: string }) {
 }
 
 interface SummaryRow {
-  today_collection: number;
+  today_collection_paise: number;
   today_count: string;
-  filtered_collection: number;
-  filtered_billed: number;
-  total_outstanding: number;
-  hospital_credit_total: number;
+  filtered_collection_paise: number;
+  filtered_billed_paise: number;
+  total_outstanding_paise: number;
+  hospital_credit_total_paise: number;
   hospital_credit_count: string;
-  exempt_total: number;
+  exempt_total_paise: number;
   exempt_count: string;
   transactions: string;
 }
+
+/** Sum of a rupee expression as integer paise, optionally over a subset of rows. */
+const sumPaiseWhere = (expr: string, filter: string) =>
+  `COALESCE(SUM(${expr} * 100) FILTER (WHERE ${filter}), 0)::int8`;
 
 export async function getPaymentSummary(req: Request, res: Response) {
   const q = req.query as unknown as PaymentSummaryQuery;
@@ -53,25 +58,25 @@ export async function getPaymentSummary(req: Request, res: Response) {
   const [totals, modes] = await Promise.all([
     query<SummaryRow>(
       `SELECT
-         (SELECT COALESCE(SUM(paid_amount), 0)::float8 FROM requisitions
-           WHERE created_at >= date_trunc('day', NOW())) AS today_collection,
+         (SELECT ${sumPaise('paid_amount')} FROM requisitions
+           WHERE created_at >= date_trunc('day', NOW())) AS today_collection_paise,
          (SELECT COUNT(*) FROM requisitions WHERE created_at >= date_trunc('day', NOW())) AS today_count,
-         COALESCE(SUM(r.paid_amount), 0)::float8 AS filtered_collection,
-         COALESCE(SUM(r.total_amount), 0)::float8 AS filtered_billed,
-         COALESCE(SUM(${BALANCE_DUE}), 0)::float8 AS total_outstanding,
-         COALESCE(SUM(r.total_amount) FILTER (WHERE r.payment_status = 'HOSPITAL_CREDIT'), 0)::float8 AS hospital_credit_total,
+         ${sumPaise('r.paid_amount')} AS filtered_collection_paise,
+         ${sumPaise('r.total_amount')} AS filtered_billed_paise,
+         ${sumPaise(`(${BALANCE_DUE})`)} AS total_outstanding_paise,
+         ${sumPaiseWhere('r.total_amount', "r.payment_status = 'HOSPITAL_CREDIT'")} AS hospital_credit_total_paise,
          COUNT(*) FILTER (WHERE r.payment_status = 'HOSPITAL_CREDIT') AS hospital_credit_count,
-         COALESCE(SUM(r.total_amount) FILTER (WHERE r.payment_status = 'EXEMPT'), 0)::float8 AS exempt_total,
+         ${sumPaiseWhere('r.total_amount', "r.payment_status = 'EXEMPT'")} AS exempt_total_paise,
          COUNT(*) FILTER (WHERE r.payment_status = 'EXEMPT') AS exempt_count,
          COUNT(*) AS transactions
        ${from}`,
       params,
     ),
-    query<{ mode: string | null; count: string; billed: number; collected: number; balance_due: number }>(
+    query<{ mode: string | null; count: string; billed_paise: number; collected_paise: number; balance_due_paise: number }>(
       `SELECT r.payment_mode AS mode, COUNT(*) AS count,
-              COALESCE(SUM(r.total_amount), 0)::float8 AS billed,
-              COALESCE(SUM(r.paid_amount), 0)::float8 AS collected,
-              COALESCE(SUM(${BALANCE_DUE}), 0)::float8 AS balance_due
+              ${sumPaise('r.total_amount')} AS billed_paise,
+              ${sumPaise('r.paid_amount')} AS collected_paise,
+              ${sumPaise(`(${BALANCE_DUE})`)} AS balance_due_paise
        ${from}
        GROUP BY r.payment_mode`,
       params,
@@ -85,23 +90,23 @@ export async function getPaymentSummary(req: Request, res: Response) {
     return {
       mode: mode ?? 'NOT_RECORDED',
       count: Number(m?.count ?? 0),
-      billed: m?.billed ?? 0,
-      collected: m?.collected ?? 0,
-      balance_due: m?.balance_due ?? 0,
+      billed_paise: m?.billed_paise ?? 0,
+      collected_paise: m?.collected_paise ?? 0,
+      balance_due_paise: m?.balance_due_paise ?? 0,
     };
   };
 
   res.json({
     success: true,
     data: {
-      today_collection: t.today_collection,
+      today_collection_paise: t.today_collection_paise,
       today_count: Number(t.today_count),
-      filtered_collection: t.filtered_collection,
-      filtered_billed: t.filtered_billed,
-      total_outstanding: t.total_outstanding,
-      hospital_credit_total: t.hospital_credit_total,
+      filtered_collection_paise: t.filtered_collection_paise,
+      filtered_billed_paise: t.filtered_billed_paise,
+      total_outstanding_paise: t.total_outstanding_paise,
+      hospital_credit_total_paise: t.hospital_credit_total_paise,
       hospital_credit_count: Number(t.hospital_credit_count),
-      exempt_total: t.exempt_total,
+      exempt_total_paise: t.exempt_total_paise,
       exempt_count: Number(t.exempt_count),
       transactions: Number(t.transactions),
       breakdown_by_mode: [...PAYMENT_MODES.map(toBreakdown), toBreakdown(null)],
@@ -110,10 +115,15 @@ export async function getPaymentSummary(req: Request, res: Response) {
 }
 
 const TRANSACTION_COLUMNS = `
-  r.id, r.lab_no, r.created_at, r.sample_received_datetime, r.status,
-  p.id AS patient_id, p.name AS patient_name, p.phone,
-  r.total_amount::float8 AS total_amount, r.paid_amount::float8 AS paid_amount,
-  (${BALANCE_DUE})::float8 AS balance_due, r.payment_mode, r.payment_status, r.exempt_referred_by,
+  r.id, r.lab_no, r.receipt_no, r.created_at, r.sample_received_datetime, r.status, r.cancelled_at,
+  p.id AS patient_id, p.name AS patient_name, p.phone, r.sample_nature,
+  COALESCE(
+    (SELECT string_agg(t.test_name, ', ' ORDER BY t.id)
+     FROM requisition_tests t WHERE t.requisition_id = r.id),
+    ''
+  ) AS investigations,
+  ${paise('r.total_amount')} AS total_amount_paise, ${paise('r.paid_amount')} AS paid_amount_paise,
+  ${paise(`(${BALANCE_DUE})`)} AS balance_due_paise, r.payment_mode, r.payment_status, r.exempt_referred_by,
   (r.status = 'VERIFIED'
     OR EXISTS (SELECT 1 FROM general_reports g WHERE g.requisition_id = r.id AND g.is_verified)
     OR EXISTS (SELECT 1 FROM antibiogram_reports a WHERE a.requisition_id = r.id AND a.is_verified)) AS is_verified`;
@@ -182,11 +192,11 @@ export async function getPatientLedger(req: Request, res: Response) {
     patient_id: number;
     patient_name: string;
     phone: string | null;
-    total_amount: number;
-    paid_amount: number;
-    balance_due: number;
+    total_amount_paise: number;
+    paid_amount_paise: number;
+    balance_due_paise: number;
   }>(
-    `SELECT ${TRANSACTION_COLUMNS}, r.sample_nature
+    `SELECT ${TRANSACTION_COLUMNS}
      FROM requisitions r JOIN patients p ON p.id = r.patient_id
      WHERE ${conditions.join(' AND ')}
      ORDER BY r.created_at ASC, r.id ASC`,
@@ -197,8 +207,8 @@ export async function getPatientLedger(req: Request, res: Response) {
   const patients = [
     ...new Map(rows.map((v) => [v.patient_id, { id: v.patient_id, name: v.patient_name, phone: v.phone }])).values(),
   ];
-  const sum = (key: 'total_amount' | 'paid_amount' | 'balance_due') =>
-    Math.round(rows.reduce((acc, v) => acc + v[key], 0) * 100) / 100;
+  const sum = (key: 'total_amount_paise' | 'paid_amount_paise' | 'balance_due_paise') =>
+    rows.reduce((acc, v) => acc + v[key], 0);
 
   // A name typed slightly differently matches nothing exactly; offer close patient records to pick from.
   let suggestions: { id: number; name: string; phone: string | null; visits: number }[] = [];
@@ -215,14 +225,28 @@ export async function getPatientLedger(req: Request, res: Response) {
     suggestions = s.rows.map((r) => ({ ...r, visits: Number(r.visits) }));
   }
 
+  await writeAuditLog({
+    userId: req.user!.sub,
+    action: 'PATIENT_LEDGER_SEARCH',
+    entityName: 'payments',
+    details: {
+      phone_no: q.phone_no ?? null,
+      patient_name: q.patient_name ?? null,
+      patients_found: patients.length,
+      visits_found: rows.length,
+      suggestions_shown: suggestions.length,
+      ip: req.ip,
+    },
+  });
+
   res.json({
     success: true,
     data: {
       patients,
       total_visits: rows.length,
-      lifetime_billed: sum('total_amount'),
-      lifetime_paid: sum('paid_amount'),
-      lifetime_balance_due: sum('balance_due'),
+      lifetime_billed_paise: sum('total_amount_paise'),
+      lifetime_paid_paise: sum('paid_amount_paise'),
+      lifetime_balance_due_paise: sum('balance_due_paise'),
       visits: rows,
       suggestions,
     },

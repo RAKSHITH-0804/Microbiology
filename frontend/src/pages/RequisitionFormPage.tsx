@@ -15,6 +15,7 @@ import {
   ReceiptIndianRupee,
   RotateCcw,
   Save,
+  ShieldAlert,
   TestTubes,
   UserRound,
   X,
@@ -33,6 +34,7 @@ import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
 import { createRequisition, fetchSamples, fetchTestCatalog, updateRequisition } from '@/features/requisitions/api';
 import { fetchRequisition } from '@/features/reports/api';
 import {
+  AGE_UNIT_OPTIONS,
   buildRequisitionFormSchema,
   fromRequisition,
   RequisitionFormValues,
@@ -48,28 +50,33 @@ import {
   EMPTY_PAYMENT,
   EXEMPT_REFERRAL_LABEL,
   EXEMPT_REFERRAL_PLACEHOLDER,
-  formatRupees,
   isNoCounterPayment,
   isReleasedForReporting,
+  lowersPaidBill,
+  OVERRIDE_REASON_MIN,
   paymentModeNote,
 } from '@/features/requisitions/payment';
+import { CancelledNotice } from '@/components/requisitions/CancelledNotice';
 import { useAuth } from '@/context/AuthContext';
+import { canSeeBilling } from '@/layout/navigation';
 import { getErrorMessage } from '@/lib/api';
 import { toDateTimeLocal } from '@/lib/datetime';
 import { formatDateTime } from '@/lib/format';
-import { HOSPITALS, PAYMENT_MODES, type MasterSample, type PaymentStatus, type TestCategory } from '@/types/requisition';
+import { formatPaise } from '@/lib/money';
+import {
+  HOSPITALS,
+  PAYMENT_MODES,
+  type AgeUnit,
+  type MasterSample,
+  type PaymentStatus,
+  type TestCategory,
+} from '@/types/requisition';
 import type { RequisitionDetail } from '@/types/report';
 
 const SEX_OPTIONS = [
   { value: 'M', label: 'Male' },
   { value: 'F', label: 'Female' },
   { value: 'Other', label: 'Other' },
-] as const;
-
-const AGE_PARTS = [
-  { key: 'years', label: 'Years', maxLength: 3, max: 150 },
-  { key: 'months', label: 'Months', maxLength: 2, max: 11 },
-  { key: 'days', label: 'Days', maxLength: 2, max: 31 },
 ] as const;
 
 /** Blocks non-digit characters while still allowing shortcuts (Ctrl+V, Ctrl+A) and navigation keys. */
@@ -83,7 +90,7 @@ function emptyForm(): RequisitionFormValues {
     receipt_no: '',
     sample_received_datetime: toDateTimeLocal(),
     patient_name: '',
-    age: { years: '', months: '', days: '' },
+    age: { value: '', unit: 'Y' },
     sex: '',
     phone: '',
     address: '',
@@ -100,6 +107,7 @@ function emptyForm(): RequisitionFormValues {
     sample_collection_datetime: '',
     tests: [],
     ...EMPTY_PAYMENT,
+    billing_reason: '',
   };
 }
 
@@ -128,7 +136,12 @@ export default function RequisitionFormPage() {
   const { user } = useAuth();
   // Doctors don't handle billing; the server ignores any payment fields they send.
   const showBilling = user?.role !== 'DOCTOR';
-  const formSchema = useMemo(() => buildRequisitionFormSchema(showBilling), [showBilling]);
+  // The exemption authority is hidden from staff without billing access; saving keeps the stored one.
+  const referralOnRecord = !canSeeBilling(user) && original?.payment_mode === 'EXEMPT';
+  const formSchema = useMemo(
+    () => buildRequisitionFormSchema(showBilling, referralOnRecord),
+    [showBilling, referralOnRecord],
+  );
 
   const {
     register,
@@ -136,6 +149,7 @@ export default function RequisitionFormPage() {
     handleSubmit,
     reset,
     watch,
+    setValue,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<RequisitionFormValues>({
@@ -147,6 +161,9 @@ export default function RequisitionFormPage() {
   const focusLabNo = () => setTimeout(() => document.getElementById('lab_no')?.focus(), 0);
 
   const phoneField = register('phone');
+  const ageValueField = register('age.value');
+  const ageUnit = watch('age.unit');
+  const ageUnitMeta = AGE_UNIT_OPTIONS.find((o) => o.unit === ageUnit) ?? AGE_UNIT_OPTIONS[0];
   const hospital = watch('hospital');
   const selectedTests = watch('tests');
   const payment = computePayment({
@@ -155,7 +172,7 @@ export default function RequisitionFormPage() {
     payment_mode: watch('payment_mode'),
     exempt_referred_by: watch('exempt_referred_by'),
   });
-  const balanceDue = Math.max(payment.total_amount - payment.paid_amount, 0);
+  const balanceDue = Math.max(payment.total_amount_paise - payment.paid_amount_paise, 0);
   const exempt = payment.payment_mode === 'EXEMPT';
   const noCounterPayment = isNoCounterPayment(payment.payment_mode);
 
@@ -214,8 +231,20 @@ export default function RequisitionFormPage() {
     if (original && !mastersLoading) reset(fromRequisition(original));
   }, [original, mastersLoading, reset]);
 
-  const readOnly =
+  const verified =
     original?.status === 'VERIFIED' || !!original?.general_report?.is_verified || !!original?.antibiogram_report?.is_verified;
+  const cancelled = !!original?.cancelled_at;
+  // The HOD may correct a verified requisition; everyone else is locked out, and nobody edits a cancelled one.
+  const hodCorrection = verified && user?.role === 'HOD';
+  const readOnly = cancelled || (verified && !hodCorrection);
+  const billingChanged =
+    !!original &&
+    (payment.total_amount_paise !== original.total_amount_paise ||
+      payment.paid_amount_paise !== original.paid_amount_paise ||
+      payment.payment_mode !== original.payment_mode ||
+      payment.exempt_referred_by !== original.exempt_referred_by);
+  const needsBillingReason =
+    showBilling && !!original && ((hodCorrection && billingChanged) || lowersPaidBill(original, payment));
   const sampleOptions = useMemo(() => {
     const names = samples.map((s) => s.sample_name);
     const saved = original?.sample_nature;
@@ -235,11 +264,16 @@ export default function RequisitionFormPage() {
     try {
       if (isEdit) {
         if (!original) return;
-        const updated = await updateRequisition(original.id, toCreatePayload(values));
+        const updated = await updateRequisition(original.id, {
+          ...toCreatePayload(values),
+          billing_reason: needsBillingReason ? values.billing_reason.trim() : null,
+        });
         toast.success('Requisition updated successfully', {
-          description: isReleasedForReporting(updated.payment_status)
-            ? undefined
-            : 'Payment pending - it stays off the Pending Worklist until paid.',
+          description: updated.verification_reset
+            ? 'Patient or sample details on the verified report changed, so it was sent back to the reporting doctor for re-verification.'
+            : isReleasedForReporting(updated.payment_status)
+              ? undefined
+              : 'Payment pending - it stays off the Pending Worklist until paid.',
         });
         navigate('/requisitions/pending');
         return;
@@ -321,10 +355,21 @@ export default function RequisitionFormPage() {
         </div>
       </div>
 
-      {readOnly && (
+      {original && <CancelledNotice info={original} />}
+      {readOnly && !cancelled && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <Lock className="h-4 w-4 shrink-0" />
           Verified reports are locked and cannot be modified, so this requisition can no longer be edited.
+        </div>
+      )}
+      {hodCorrection && !cancelled && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            HOD correction of a verified requisition. Changing the patient&apos;s name, age or sex, or the nature of sample,
+            sends the verified report back to the reporting doctor for re-verification. Billing changes need a reason and do
+            not affect verification.
+          </span>
         </div>
       )}
 
@@ -436,37 +481,57 @@ export default function RequisitionFormPage() {
 
           <FormField
             label="Age"
-            htmlFor="age_years"
+            htmlFor="age_value"
             required
-            error={errors.age?.years?.message ?? errors.age?.months?.message ?? errors.age?.days?.message}
+            error={errors.age?.value?.message ?? errors.age?.unit?.message}
+            hint="Enter a number and choose Years, Months or Days"
             className="md:col-span-4"
           >
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {AGE_PARTS.map((part) => {
-                const ageField = register(`age.${part.key}`);
-                return (
-                  <label key={part.key} className="flex cursor-pointer items-center gap-1.5 text-sm text-slate-700">
-                    <Input
-                      id={`age_${part.key}`}
-                      inputMode="numeric"
-                      maxLength={part.maxLength}
-                      min={0}
-                      max={part.max}
-                      placeholder="0"
-                      autoComplete="off"
-                      className="w-14 text-center"
-                      aria-invalid={!!errors.age?.[part.key]}
-                      {...ageField}
-                      onKeyDown={allowDigitsOnly}
-                      onChange={(e) => {
-                        e.target.value = e.target.value.replace(/\D/g, '').slice(0, part.maxLength);
-                        return ageField.onChange(e);
-                      }}
-                    />
-                    {part.label}
-                  </label>
-                );
-              })}
+            <div className="flex items-center gap-2">
+              <Input
+                id="age_value"
+                inputMode="numeric"
+                maxLength={ageUnitMeta.maxLength}
+                min={0}
+                max={ageUnitMeta.max}
+                placeholder="0"
+                autoComplete="off"
+                className="w-20 text-center"
+                aria-invalid={!!errors.age?.value}
+                {...ageValueField}
+                onKeyDown={allowDigitsOnly}
+                onChange={(e) => {
+                  e.target.value = e.target.value.replace(/\D/g, '').slice(0, ageUnitMeta.maxLength);
+                  return ageValueField.onChange(e);
+                }}
+              />
+              <div
+                role="radiogroup"
+                aria-label="Age unit"
+                className="inline-flex h-9 overflow-hidden rounded-md border border-input bg-card shadow-sm"
+              >
+                {AGE_UNIT_OPTIONS.map((opt) => {
+                  const active = ageUnit === opt.unit;
+                  return (
+                    <button
+                      key={opt.unit}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      title={opt.full}
+                      className={`min-w-[2.25rem] px-2.5 text-sm font-semibold transition ${
+                        active
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-slate-600 hover:bg-slate-50'
+                      }`}
+                      onClick={() => setValue('age.unit', opt.unit as AgeUnit, { shouldDirty: true, shouldValidate: true })}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-sm text-slate-500">{ageUnitMeta.full}</span>
             </div>
           </FormField>
 
@@ -726,7 +791,7 @@ export default function RequisitionFormPage() {
               label="Amount Paid (₹)"
               htmlFor="paid_amount"
               error={errors.paid_amount?.message}
-              hint={balanceDue > 0 && !noCounterPayment ? `Balance due ${formatRupees(balanceDue)}` : undefined}
+              hint={balanceDue > 0 && !noCounterPayment ? `Balance due ${formatPaise(balanceDue)}` : undefined}
             >
               <AmountInput id="paid_amount" aria-invalid={!!errors.paid_amount} {...register('paid_amount')} />
             </FormField>
@@ -744,7 +809,14 @@ export default function RequisitionFormPage() {
               </div>
             </FormField>
           </div>
-          {exempt && (
+          {exempt && referralOnRecord && (
+            <FormField label={EXEMPT_REFERRAL_LABEL}>
+              <p className="flex h-9 items-center rounded-md border border-dashed bg-muted/40 px-3 text-sm text-muted-foreground">
+                On record - visible to billing staff only
+              </p>
+            </FormField>
+          )}
+          {exempt && !referralOnRecord && (
             <FormField
               label={EXEMPT_REFERRAL_LABEL}
               htmlFor="exempt_referred_by"
@@ -759,6 +831,23 @@ export default function RequisitionFormPage() {
                 placeholder={EXEMPT_REFERRAL_PLACEHOLDER}
                 aria-invalid={!!errors.exempt_referred_by}
                 {...register('exempt_referred_by')}
+              />
+            </FormField>
+          )}
+          {needsBillingReason && (
+            <FormField
+              label={hodCorrection ? 'Billing Override Reason' : 'Reason for Reducing a Paid Bill'}
+              htmlFor="billing_reason"
+              required
+              error={errors.billing_reason?.message}
+              hint={`At least ${OVERRIDE_REASON_MIN} characters - saved to the audit log`}
+            >
+              <Textarea
+                id="billing_reason"
+                maxLength={500}
+                aria-invalid={!!errors.billing_reason}
+                placeholder="e.g. ₹100 refunded: one investigation withdrawn at the clinician's request"
+                {...register('billing_reason')}
               />
             </FormField>
           )}
@@ -785,7 +874,15 @@ export default function RequisitionFormPage() {
           <Button type="button" variant="outline" onClick={handleReset} disabled={isSubmitting || readOnly}>
             <RotateCcw /> {isEdit ? 'Undo Changes' : 'Clear'}
           </Button>
-          <Button type="submit" disabled={isSubmitting || mastersLoading || readOnly}>
+          <Button
+            type="submit"
+            disabled={
+              isSubmitting ||
+              mastersLoading ||
+              readOnly ||
+              (needsBillingReason && watch('billing_reason').trim().length < OVERRIDE_REASON_MIN)
+            }
+          >
             {isSubmitting ? <Loader2 className="animate-spin" /> : <Save />}
             {isSubmitting ? 'Saving...' : isEdit ? 'Update Requisition' : 'Save Requisition'}
           </Button>

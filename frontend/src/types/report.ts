@@ -91,6 +91,8 @@ export interface SavedReport {
   lab_no: string;
   status: string;
   reporting_datetime: string;
+  /** The HOD corrected a verified report, so it awaits verification again. */
+  verification_reset: boolean;
 }
 
 export interface ReportArchiveParams {
@@ -115,6 +117,7 @@ export interface ReportArchiveItem {
   receipt_no: string | null;
   sample_nature: string | null;
   requisition_status: RequisitionStatus;
+  cancelled_at: string | null;
   patient: PendingRequisition['patient'];
   prepared_by_name: string | null;
   reported_by_name: string | null;

@@ -18,8 +18,7 @@ const FOOTER_VERIFIED = 190;
 const FOOTER_DRAFT = 90;
 const HEADING_FIRST = 28;
 const HEADING_CONTINUED = 51;
-const THEAD_DUAL = 48;
-const THEAD_SINGLE = 40;
+const THEAD = 40;
 const GRID_GAP = 16;
 const ROW_BORDER = 0.8;
 
@@ -52,17 +51,20 @@ const SINGLE_TABLE_MAX = 4;
 /** Antibiotics carried to the signature page when they cannot all share a page with the signatures. */
 const MIN_LAST_PAGE_ITEMS = 2;
 
-const COLUMNS: { value: SensitivityResult; label: string; short: string }[] = [
-  { value: 'S', label: 'Sensitive', short: 'S' },
-  { value: 'R', label: 'Resistant', short: 'R' },
-  { value: 'MS', label: 'Mod. Sensitive', short: 'MS' },
-];
+/** Printed Result-column labels for each sensitivity selection. */
+const RESULT_LABEL: Record<SensitivityResult, string> = {
+  S: 'Sensitive',
+  R: 'Resistant',
+  MS: 'Mod. Sensitive',
+};
 
-/** Column widths (SL No, Antibiotic, S, R, MS). */
-const DUAL_WIDTHS = ['10%', '46%', '14%', '14%', '16%'];
-const SINGLE_WIDTHS = ['8%', '44%', '16%', '16%', '16%'];
+/** Column widths (SL No, Name of Antibiotics, Result) — ~12% / 53% / 35%. */
+const DUAL_WIDTHS = ['12%', '53%', '35%'];
+const SINGLE_WIDTHS = ['12%', '53%', '35%'];
 
 const REMARK_WIDTH = BODY_WIDTH * 0.69;
+/** Name column share of table width; used for wrap-height estimates. */
+const NAME_WIDTH_FRACTION = 0.53;
 
 export interface SensitivityRow {
   antibiotic_name: string;
@@ -100,7 +102,8 @@ function lineCount(text: string, width: number, font: string): number {
 }
 
 function rowHeight(name: string, dual: boolean, d: Density): number {
-  const nameWidth = dual ? ((BODY_WIDTH - GRID_GAP) / 2) * 0.46 : BODY_WIDTH * 0.44;
+  const tableWidth = dual ? (BODY_WIDTH - GRID_GAP) / 2 : BODY_WIDTH;
+  const nameWidth = tableWidth * NAME_WIDTH_FRACTION;
   const lines = lineCount(name, nameWidth - 2 * d.paddingX - 1, fontOf(d));
   return 2 * d.paddingY + lines * d.fontSize * d.lineHeight + ROW_BORDER;
 }
@@ -111,7 +114,7 @@ const isSingleTable = (count: number, d: Density) => d === RELAXED || count <= S
 function sectionHeight(items: readonly SensitivityRow[], first: boolean, d: Density): number {
   const heading = first ? HEADING_FIRST : HEADING_CONTINUED;
   if (isSingleTable(items.length, d)) {
-    return heading + THEAD_SINGLE + items.reduce((h, r) => h + rowHeight(r.antibiotic_name, false, d), 0);
+    return heading + THEAD + items.reduce((h, r) => h + rowHeight(r.antibiotic_name, false, d), 0);
   }
   const mid = Math.ceil(items.length / 2);
   let rows = 0;
@@ -122,7 +125,7 @@ function sectionHeight(items: readonly SensitivityRow[], first: boolean, d: Dens
       right ? rowHeight(right.antibiotic_name, true, d) : 0,
     );
   }
-  return heading + THEAD_DUAL + rows;
+  return heading + THEAD + rows;
 }
 
 export interface PrintChrome {
@@ -173,6 +176,10 @@ export function paginateAntibiotics(items: readonly SensitivityRow[], chrome: Pr
   return pages;
 }
 
+function resultLabel(result: SensitivityResult | null): string {
+  return result ? RESULT_LABEL[result] : '';
+}
+
 function SensitivityTable({
   rows,
   offset,
@@ -194,13 +201,8 @@ function SensitivityTable({
       <thead>
         <tr>
           <th>SL No</th>
-          <th className="antibiogram-name">Antibiotic</th>
-          {COLUMNS.map((c) => (
-            <th key={c.value}>
-              {c.label}
-              {dual ? <br /> : ' '}({c.short})
-            </th>
-          ))}
+          <th className="antibiogram-name">Name of Antibiotics</th>
+          <th className="antibiogram-result">Result</th>
         </tr>
       </thead>
       <tbody>
@@ -208,11 +210,7 @@ function SensitivityTable({
           <tr key={r.antibiotic_name}>
             <td>{offset + i + 1}</td>
             <td className="antibiogram-name">{r.antibiotic_name}</td>
-            {COLUMNS.map((c) => (
-              <td key={c.value} className="antibiogram-mark">
-                {r.sensitivity_result === c.value ? '\u2713' : ''}
-              </td>
-            ))}
+            <td className="antibiogram-result">{resultLabel(r.sensitivity_result)}</td>
           </tr>
         ))}
       </tbody>
@@ -225,6 +223,9 @@ function SensitivityTable({
  * full-width table; larger reports split each page evenly into two side-by-side tables (left takes the
  * extra row when the count is odd), with tighter rows for long lists. Pages are filled by available
  * height and numbering runs on across tables and pages.
+ *
+ * Each table has three columns: SL No, Name of Antibiotics, and Result (full word: Sensitive /
+ * Resistant / Mod. Sensitive).
  */
 export function AntibiogramSensitivityGrid({ results, ...chrome }: { results: SensitivityRow[] } & PrintChrome) {
   const pages = paginateAntibiotics(results, chrome);

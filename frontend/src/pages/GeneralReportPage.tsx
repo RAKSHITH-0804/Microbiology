@@ -13,8 +13,11 @@ import { FormField } from '@/components/FormField';
 import { NothingToPrintNotice, ReportActionBar, ReportPageFrame } from '@/components/reports/ReportPageFrame';
 import { ReportPrintLayout } from '@/components/reports/ReportPrintLayout';
 import { RequisitionSummaryCard } from '@/components/reports/RequisitionSummaryCard';
+import { RevokeVerificationDialog } from '@/components/reports/RevokeVerificationDialog';
 import { SignatoryFields } from '@/components/reports/SignatoryFields';
+import { CancelledNotice } from '@/components/requisitions/CancelledNotice';
 import { fetchFindingTemplates, saveGeneralReport } from '@/features/reports/api';
+import { inheritedInvestigation, inheritedSpecimen } from '@/features/reports/inheritedFields';
 import { useReportAccess } from '@/features/reports/useReportAccess';
 import { useReportData } from '@/features/reports/useReportData';
 import { getErrorMessage } from '@/lib/api';
@@ -39,10 +42,10 @@ const normalizePhrase = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/\.
 
 function defaultsFor(r: RequisitionDetail): FormValues {
   const report = r.general_report;
-  const specimen = [r.sample_nature, r.site_of_collection && `(${r.site_of_collection})`].filter(Boolean).join(' ');
   return {
-    specimen: report?.specimen ?? specimen.slice(0, 150),
-    investigation_done: report?.investigation_done ?? r.tests.map((t) => t.test_name).join(', ').slice(0, 255),
+    // Always inherited from the requisition master; never overridden at report entry.
+    specimen: inheritedSpecimen(r).slice(0, 150),
+    investigation_done: inheritedInvestigation(r).slice(0, 255),
     report_findings: report?.report_findings ?? '',
     prepared_by: report?.prepared_by ? String(report.prepared_by) : '',
     reported_by: report?.reported_by ? String(report.reported_by) : '',
@@ -75,12 +78,13 @@ export default function GeneralReportPage() {
   const requisition = data?.requisition;
   const templates = data?.extra ?? [];
   const values = watch();
-  const { readOnly, readOnlyMessage, draft, printable, print } = useReportAccess({
-    loaded: !!requisition,
+  const { readOnly, readOnlyMessage, notice, draft, printable, print, canRevoke } = useReportAccess({
+    reportType: 'general',
+    requisition,
     report: requisition?.general_report,
-    requisitionVerified: requisition?.status === 'VERIFIED',
     isDirty,
   });
+  const [revokeOpen, setRevokeOpen] = useState(false);
 
   const relevantNames = useMemo(
     () => [...new Set(requisition?.tests.map((t) => t.template_test_name).filter((n): n is string => !!n) ?? [])],
@@ -108,24 +112,27 @@ export default function GeneralReportPage() {
 
   const save = async (v: FormValues): Promise<boolean> => {
     if (!requisition) return false;
+    const specimen = inheritedSpecimen(requisition).slice(0, 150) || null;
+    const investigation_done = inheritedInvestigation(requisition).slice(0, 255) || null;
     try {
       const saved = await saveGeneralReport({
         requisition_id: requisition.id,
-        specimen: v.specimen.trim() || null,
-        investigation_done: v.investigation_done.trim() || null,
+        specimen,
+        investigation_done,
         report_findings: v.report_findings.trim(),
         prepared_by: Number(v.prepared_by),
         reported_by: Number(v.reported_by),
       });
       updateRequisition((r) => ({
         ...r,
-        status: r.status === 'RECEIVED' ? 'REPORT_ENTERED' : r.status,
+        status: 'REPORT_ENTERED',
         general_report_id: saved.id,
+        general_report_verified: false,
         general_report: {
           id: saved.id,
           reporting_datetime: saved.reporting_datetime,
-          specimen: v.specimen.trim() || null,
-          investigation_done: v.investigation_done.trim() || null,
+          specimen,
+          investigation_done,
           report_findings: v.report_findings.trim(),
           prepared_by: Number(v.prepared_by),
           reported_by: Number(v.reported_by),
@@ -133,8 +140,12 @@ export default function GeneralReportPage() {
           updated_at: new Date().toISOString(),
         },
       }));
-      reset(v);
-      toast.success(`General report saved - Lab No ${saved.lab_no}`);
+      reset({ ...v, specimen: specimen ?? '', investigation_done: investigation_done ?? '' });
+      if (saved.verification_reset) {
+        toast.success(`General report corrected - Lab No ${saved.lab_no}`, {
+          description: 'Verification was reset and the reporting doctor has been notified to verify it again.',
+        });
+      } else toast.success(`General report saved - Lab No ${saved.lab_no}`);
       return true;
     } catch (err) {
       const body = (err as { response?: { data?: { errors?: Record<string, string[]> } } }).response?.data;
@@ -165,6 +176,7 @@ export default function GeneralReportPage() {
       >
         {requisition && data && (
           <form noValidate onSubmit={onSave} className="space-y-5">
+            <CancelledNotice info={requisition} />
             <RequisitionSummaryCard
               requisition={requisition}
               reportingDateTime={requisition.general_report?.reporting_datetime ?? null}
@@ -177,16 +189,19 @@ export default function GeneralReportPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <FormField label="Specimen" htmlFor="specimen" error={errors.specimen?.message}>
-                    <Input id="specimen" disabled={readOnly} aria-invalid={!!errors.specimen} {...register('specimen')} />
+                  <FormField
+                    label="Specimen"
+                    htmlFor="specimen"
+                    hint="Locked to the requisition sample details"
+                  >
+                    <Input id="specimen" disabled readOnly aria-readonly="true" {...register('specimen')} />
                   </FormField>
-                  <FormField label="Investigation Done" htmlFor="investigation_done" error={errors.investigation_done?.message}>
-                    <Input
-                      id="investigation_done"
-                      disabled={readOnly}
-                      aria-invalid={!!errors.investigation_done}
-                      {...register('investigation_done')}
-                    />
+                  <FormField
+                    label="Investigation Done"
+                    htmlFor="investigation_done"
+                    hint="Locked to the investigations selected at registration"
+                  >
+                    <Input id="investigation_done" disabled readOnly aria-readonly="true" {...register('investigation_done')} />
                   </FormField>
                 </div>
                 <SignatoryFields
@@ -278,10 +293,20 @@ export default function GeneralReportPage() {
               readOnlyMessage={readOnlyMessage}
               draft={draft}
               onPrint={print}
+              notice={notice}
+              onRevoke={canRevoke ? () => setRevokeOpen(true) : undefined}
             />
           </form>
         )}
       </ReportPageFrame>
+      <RevokeVerificationDialog
+        open={revokeOpen}
+        reportType="general"
+        reportId={requisition?.general_report?.id}
+        labNo={requisition?.lab_no}
+        onClose={() => setRevokeOpen(false)}
+        onRevoked={reload}
+      />
 
       {requisition && !printable && <NothingToPrintNotice />}
       {requisition && printable && (

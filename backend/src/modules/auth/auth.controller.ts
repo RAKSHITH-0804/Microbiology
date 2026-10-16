@@ -46,6 +46,21 @@ function toPublicUser(row: UserRow) {
   };
 }
 
+/** Longest attempted username kept in the audit trail (the audit_logs.username column width). */
+const AUDIT_USERNAME_MAX = 50;
+
+/** Records a rejected sign-in: who was attempted and from where. The password is never part of it. */
+async function auditFailedLogin(req: Request, username: string, reason: string, accountId: number | null) {
+  await writeAuditLog({
+    userId: null,
+    username: username.slice(0, AUDIT_USERNAME_MAX),
+    action: 'LOGIN_FAILED',
+    entityName: 'users',
+    entityId: accountId,
+    details: { reason, ip: req.ip, userAgent: req.get('user-agent') },
+  });
+}
+
 export async function login(req: Request, res: Response) {
   const { username, password } = req.body as LoginInput;
 
@@ -53,9 +68,16 @@ export async function login(req: Request, res: Response) {
   const user = rows[0];
 
   const valid = user ? await bcrypt.compare(password, user.password_hash) : false;
-  if (!user || !valid) throw new AppError(401, 'Invalid username or password');
-  if (!user.is_active) throw new AppError(403, 'Your account is disabled. Contact the HOD.');
+  if (!user || !valid) {
+    await auditFailedLogin(req, username, user ? 'bad_password' : 'unknown_user', user?.id ?? null);
+    throw new AppError(401, 'Invalid username or password');
+  }
+  if (!user.is_active) {
+    await auditFailedLogin(req, username, 'disabled', user.id);
+    throw new AppError(403, 'Your account is disabled. Contact the HOD.');
+  }
 
+  await query('UPDATE users SET last_seen_at = NOW() WHERE id = $1', [user.id]);
   const token = signToken({ sub: user.id, username: user.username, role: user.role });
   res.cookie(AUTH_COOKIE, token, authCookieOptions);
 
@@ -137,6 +159,11 @@ export async function logout(req: Request, res: Response) {
     }
   }
   res.json({ success: true, message: 'Logged out' });
+}
+
+/** Reports user activity seen only in the browser (typing, scrolling), so the server-side idle timer stays in step. */
+export async function heartbeat(_req: Request, res: Response) {
+  res.status(204).end();
 }
 
 export async function me(req: Request, res: Response) {

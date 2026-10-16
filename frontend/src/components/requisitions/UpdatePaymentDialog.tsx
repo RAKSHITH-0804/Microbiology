@@ -18,16 +18,18 @@ import {
   EMPTY_PAYMENT,
   EXEMPT_REFERRAL_LABEL,
   EXEMPT_REFERRAL_PLACEHOLDER,
-  formatRupees,
   isNoCounterPayment,
   isReleasedForReporting,
+  lowersPaidBill,
   OVERRIDE_REASON_MIN,
   paymentFormFrom,
+  paymentFormKey,
   paymentModeNote,
   paymentFormSchema,
   type PaymentFormValues,
 } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
+import { formatPaise, paiseToRupeeInput } from '@/lib/money';
 import { PAYMENT_MODES, type PaymentTarget, type UpdatedPayment } from '@/types/requisition';
 
 export function UpdatePaymentDialog({
@@ -52,7 +54,6 @@ export function UpdatePaymentDialog({
   const override = !!requisition?.is_verified;
   const [reason, setReason] = useState('');
   const [reasonError, setReasonError] = useState<string | undefined>();
-  const reasonMissing = override && reason.trim().length < OVERRIDE_REASON_MIN;
 
   useEffect(() => {
     if (requisition) reset(paymentFormFrom(requisition));
@@ -68,12 +69,15 @@ export function UpdatePaymentDialog({
   });
   const exempt = payment.payment_mode === 'EXEMPT';
   const noCounterPayment = isNoCounterPayment(payment.payment_mode);
-  const balanceDue = Math.max(payment.total_amount - payment.paid_amount, 0);
+  const balanceDue = Math.max(payment.total_amount_paise - payment.paid_amount_paise, 0);
+  const reducingPaidBill = !!requisition && lowersPaidBill(requisition, payment);
+  const needsReason = override || reducingPaidBill;
+  const reasonMissing = needsReason && reason.trim().length < OVERRIDE_REASON_MIN;
 
   const onSubmit = async (v: PaymentFormValues) => {
     if (!requisition) return;
     try {
-      const result = await updatePayment(requisition.id, computePayment(v), override ? reason.trim() : undefined);
+      const result = await updatePayment(requisition.id, computePayment(v), needsReason ? reason.trim() : undefined);
       if (!result.changed) toast.info('No payment changes to save');
       else if (isReleasedForReporting(result.payment_status) && !isReleasedForReporting(requisition.payment_status)) {
         toast.success(`Payment recorded - ${result.lab_no} is now on the Pending Worklist`);
@@ -81,7 +85,8 @@ export function UpdatePaymentDialog({
       onSaved(result);
       onClose();
     } catch (err) {
-      for (const [key, message] of Object.entries(fieldErrors(err))) {
+      for (const [serverKey, message] of Object.entries(fieldErrors(err))) {
+        const key = paymentFormKey(serverKey);
         if (key in EMPTY_PAYMENT) setError(key as keyof PaymentFormValues, { type: 'server', message });
         if (key === 'reason') setReasonError(message);
       }
@@ -122,7 +127,7 @@ export function UpdatePaymentDialog({
                   label="Amount Paid (₹)"
                   htmlFor="pay_paid"
                   error={errors.paid_amount?.message}
-                  hint={balanceDue > 0 && !noCounterPayment ? `Balance due ${formatRupees(balanceDue)}` : undefined}
+                  hint={balanceDue > 0 && !noCounterPayment ? `Balance due ${formatPaise(balanceDue)}` : undefined}
                 >
                   <AmountInput id="pay_paid" aria-invalid={!!errors.paid_amount} {...register('paid_amount')} />
                 </FormField>
@@ -139,8 +144,10 @@ export function UpdatePaymentDialog({
                     type="button"
                     variant="outline"
                     className="w-full"
-                    disabled={payment.total_amount <= 0 || balanceDue === 0 || noCounterPayment}
-                    onClick={() => setValue('paid_amount', String(payment.total_amount), { shouldValidate: true, shouldDirty: true })}
+                    disabled={payment.total_amount_paise <= 0 || balanceDue === 0 || noCounterPayment}
+                    onClick={() =>
+                      setValue('paid_amount', paiseToRupeeInput(payment.total_amount_paise), { shouldValidate: true, shouldDirty: true })
+                    }
                   >
                     Settle full amount
                   </Button>
@@ -162,9 +169,15 @@ export function UpdatePaymentDialog({
                   />
                 </FormField>
               )}
-              {override && (
+              {!override && reducingPaidBill && (
+                <p className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  This bill is fully paid. Reducing the amount billed or paid requires a reason for the audit log.
+                </p>
+              )}
+              {needsReason && (
                 <FormField
-                  label="Override Reason"
+                  label={override ? 'Override Reason' : 'Reason for Reducing a Paid Bill'}
                   htmlFor="pay_reason"
                   required
                   error={reasonError}
@@ -175,7 +188,11 @@ export function UpdatePaymentDialog({
                     value={reason}
                     maxLength={500}
                     aria-invalid={!!reasonError}
-                    placeholder="e.g. Balance of ₹200 received at the counter after the report was issued"
+                    placeholder={
+                      override
+                        ? 'e.g. Balance of ₹200 received at the counter after the report was issued'
+                        : 'e.g. ₹100 refunded: test cancelled at the patient’s request'
+                    }
                     onChange={(e) => {
                       setReason(e.target.value);
                       setReasonError(undefined);

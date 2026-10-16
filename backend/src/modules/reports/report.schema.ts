@@ -54,6 +54,25 @@ export const verifyReportParams = z.object({
 });
 export type VerifyReportParams = z.infer<typeof verifyReportParams>;
 
+export const REASON_MIN = 10;
+
+/** A written reason for actions that undo or override earlier work. */
+export const reasonText = (what: string) =>
+  z
+    .string({ required_error: `Enter the reason for ${what}` })
+    .trim()
+    .min(REASON_MIN, `Enter the reason for ${what} (at least ${REASON_MIN} characters)`)
+    .max(500, 'Must be at most 500 characters');
+
+export const revokeVerificationSchema = z.object({ reason: reasonText('revoking verification') });
+export type RevokeVerificationInput = z.infer<typeof revokeVerificationSchema>;
+
+export const printLogParams = z.object({
+  type: verifyReportParams.shape.type,
+  requisitionId: z.coerce.number().int().positive('Invalid requisition id'),
+});
+export type PrintLogParams = z.infer<typeof printLogParams>;
+
 export const listReportsQuery = z.object({
   search: z.string().trim().max(100).optional(),
   type: z.enum(REPORT_TYPES, { errorMap: () => ({ message: 'Report type must be general or antibiogram' }) }).optional(),

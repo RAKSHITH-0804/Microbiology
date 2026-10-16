@@ -4,8 +4,11 @@ import type { AppNotification } from '@/types/notification';
 /** Fired after an action that may close or create notifications, so the header bell refreshes at once. */
 export const NOTIFICATIONS_CHANGED = 'jjm-micro:notifications-changed';
 
+/** Polled in the background, so it must not count as user activity for the server's idle timeout. */
 export async function fetchNotifications(): Promise<AppNotification[]> {
-  const res = await api.get<ApiResponse<AppNotification[]>>('/notifications');
+  const res = await api.get<ApiResponse<AppNotification[]>>('/notifications', {
+    headers: { 'X-Background-Request': '1' },
+  });
   return res.data.data;
 }
 

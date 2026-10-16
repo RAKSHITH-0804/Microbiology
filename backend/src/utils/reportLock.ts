@@ -14,7 +14,9 @@ export async function isRequisitionLocked(client: PoolClient, requisitionId: num
   return rows[0].locked;
 }
 
-/** Rejects any change to a requisition that is verified or has a verified report. */
-export async function assertRequisitionUnlocked(client: PoolClient, requisitionId: number, status: string) {
-  if (await isRequisitionLocked(client, requisitionId, status)) throw new AppError(400, REPORT_LOCKED_MESSAGE);
+/** Rejects any work on a cancelled requisition; it stays on record but is closed. */
+export function assertNotCancelled(requisition: { lab_no: string; cancelled_at: Date | null }) {
+  if (requisition.cancelled_at) {
+    throw new AppError(400, `Requisition ${requisition.lab_no} is cancelled and can no longer be changed`);
+  }
 }

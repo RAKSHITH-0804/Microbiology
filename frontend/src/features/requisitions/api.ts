@@ -35,10 +35,15 @@ export async function updateRequisition(id: number, payload: CreateRequisitionPa
   return res.data.data;
 }
 
-/** `reason` is required by the server when the HOD overrides the bill of a verified requisition. */
+/** `reason` is required when the HOD overrides the bill of a verified requisition, or a fully paid bill is reduced. */
 export async function updatePayment(id: number, payload: PaymentPayload, reason?: string): Promise<UpdatedPayment> {
   const res = await api.patch<ApiResponse<UpdatedPayment>>(`/requisitions/${id}/payment`, { ...payload, reason });
   return res.data.data;
+}
+
+/** HOD or Super Admin; once a report is verified, the HOD only. */
+export async function cancelRequisition(id: number, reason: string) {
+  return (await api.post<ApiResponse<{ lab_no: string }>>(`/requisitions/${id}/cancel`, { reason })).data;
 }
 
 export async function fetchPendingRequisitions(): Promise<PendingRequisition[]> {

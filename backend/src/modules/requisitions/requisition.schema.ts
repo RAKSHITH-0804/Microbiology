@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { reasonText } from '../reports/report.schema';
 import { PAYMENT_STATUSES, paymentFields } from './payment';
 
 export const HOSPITALS = ['CGH', 'BH', 'PVT', 'WCH', 'Other'] as const;
@@ -88,6 +89,8 @@ export const createRequisitionSchema = z
       ),
     // Cross-field billing rules (paid <= total, mode when paid) are enforced by billingFor() in the controller.
     ...paymentFields,
+    /** Edits only: why a verified or fully paid bill is being changed. */
+    billing_reason: optionalText(500),
   })
   .superRefine((data, ctx) => {
     if (data.hospital === 'Other' && !data.hospital_other) {
@@ -129,3 +132,6 @@ export const statusSearchQuery = z.object({
 });
 
 export type StatusSearchQuery = z.infer<typeof statusSearchQuery>;
+
+export const cancelRequisitionSchema = z.object({ reason: reasonText('cancelling this requisition') });
+export type CancelRequisitionInput = z.infer<typeof cancelRequisitionSchema>;

@@ -123,10 +123,10 @@
     print-color-adjust: exact;
   }
 
-  /* Half-width tables: smaller header text and side padding so "Sensitive" / "Resistant" stay inside their cells. */
+  /* Half-width 3-column tables: slightly tighter header padding. */
   .antibiogram-table--dual th {
-    padding: 5px 2px !important;
-    font-size: 9.5px;
+    padding: 5px 4px !important;
+    font-size: 10px;
   }
 
   /* Row density tiers; keep in sync with the Density values in AntibiogramSensitivityGrid.tsx. */
@@ -149,12 +149,13 @@
     line-height: 1.25;
   }
 
-  .antibiogram-table .antibiogram-name {
+  .antibiogram-table .antibiogram-name,
+  .antibiogram-table .antibiogram-result {
     text-align: left;
   }
 
-  .antibiogram-table .antibiogram-mark {
-    font-weight: 700;
+  .antibiogram-table .antibiogram-result {
+    font-weight: 600;
   }
 
   .print-report table {

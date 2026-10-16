@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 const IDLE_MS = 15 * 60 * 1000;
 const WARNING_MS = 2 * 60 * 1000;
 const CHECK_EVERY_MS = 1000;
+/** How often ongoing activity is reported to the server, which signs out sessions idle for 17 minutes. */
+const HEARTBEAT_MS = 60 * 1000;
 const TOAST_ID = 'idle-timeout';
 /** Shared by every open tab, so working in one tab keeps the others signed in too. */
 const STORAGE_KEY = 'jjm-micro:last-activity';
@@ -21,16 +23,20 @@ function readStoredActivity(): number {
 
 /**
  * Signs the user out after 15 minutes without mouse or keyboard activity, preceded by a
- * 2-minute warning toast. Any activity during the warning cancels it.
+ * 2-minute warning toast. Any activity during the warning cancels it. While the user is active,
+ * `onActive` is called at most once a minute so the server knows the session is in use.
  */
-export function useIdleTimeout(enabled: boolean, onTimeout: () => void) {
+export function useIdleTimeout(enabled: boolean, onTimeout: () => void, onActive?: () => void) {
   const onTimeoutRef = useRef(onTimeout);
   onTimeoutRef.current = onTimeout;
+  const onActiveRef = useRef(onActive);
+  onActiveRef.current = onActive;
 
   useEffect(() => {
     if (!enabled) return;
 
     let lastActivity = Date.now();
+    let lastHeartbeat = lastActivity;
     let warningShown = false;
     let timedOut = false;
     localStorage.setItem(STORAGE_KEY, String(lastActivity));
@@ -41,6 +47,10 @@ export function useIdleTimeout(enabled: boolean, onTimeout: () => void) {
       if (now - lastActivity < 1000) return;
       lastActivity = now;
       localStorage.setItem(STORAGE_KEY, String(now));
+      if (now - lastHeartbeat >= HEARTBEAT_MS) {
+        lastHeartbeat = now;
+        onActiveRef.current?.();
+      }
     };
 
     const dismissWarning = () => {

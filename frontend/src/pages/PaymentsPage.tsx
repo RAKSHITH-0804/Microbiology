@@ -50,12 +50,15 @@ import {
   downloadPdf,
   downloadXlsx,
   modeName,
+  referredBy,
   type ExportFormat,
   type RevenueExport,
 } from '@/features/payments/export';
-import { formatRupees, isNoCounterPayment, PAYMENT_STATUS_META } from '@/features/requisitions/payment';
+import { CancelledBadge } from '@/components/requisitions/CancelledNotice';
+import { isNoCounterPayment, PAYMENT_STATUS_META } from '@/features/requisitions/payment';
 import { getErrorMessage } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/format';
+import { formatPaise } from '@/lib/money';
 import { useFilterParams } from '@/lib/useFilterParams';
 import { cn } from '@/lib/utils';
 import type { PatientLedger, PaymentFilters, PaymentHistoryPage, PaymentSummary, PaymentTransaction } from '@/types/payments';
@@ -103,8 +106,8 @@ const toTarget = (t: PaymentTransaction): PaymentTarget => ({
   id: t.id,
   lab_no: t.lab_no,
   patient_name: t.patient_name,
-  total_amount: t.total_amount,
-  paid_amount: t.paid_amount,
+  total_amount_paise: t.total_amount_paise,
+  paid_amount_paise: t.paid_amount_paise,
   payment_mode: t.payment_mode,
   payment_status: t.payment_status,
   exempt_referred_by: t.exempt_referred_by,
@@ -136,7 +139,7 @@ function KpiCard({
         </div>
         <div className="min-w-0">
           <p className="text-2xl font-semibold tabular-nums text-slate-900">
-            {value !== undefined ? formatRupees(value) : loading ? <Loader2 className="h-5 w-5 animate-spin text-slate-300" /> : '-'}
+            {value !== undefined ? formatPaise(value) : loading ? <Loader2 className="h-5 w-5 animate-spin text-slate-300" /> : '-'}
           </p>
           <p className="text-sm font-medium text-slate-700">{label}</p>
           <p className="text-xs text-muted-foreground">{hint}</p>
@@ -276,12 +279,12 @@ function PatientHistory({
               </div>
               {[
                 { label: 'Total Visits', value: String(ledger.total_visits), tone: 'text-slate-900' },
-                { label: 'Lifetime Billed', value: formatRupees(ledger.lifetime_billed), tone: 'text-slate-900' },
-                { label: 'Lifetime Paid', value: formatRupees(ledger.lifetime_paid), tone: 'text-emerald-700' },
+                { label: 'Lifetime Billed', value: formatPaise(ledger.lifetime_billed_paise), tone: 'text-slate-900' },
+                { label: 'Lifetime Paid', value: formatPaise(ledger.lifetime_paid_paise), tone: 'text-emerald-700' },
                 {
                   label: 'Balance Due',
-                  value: formatRupees(ledger.lifetime_balance_due),
-                  tone: ledger.lifetime_balance_due > 0 ? 'text-amber-700' : 'text-slate-900',
+                  value: formatPaise(ledger.lifetime_balance_due_paise),
+                  tone: ledger.lifetime_balance_due_paise > 0 ? 'text-amber-700' : 'text-slate-900',
                 },
               ].map((s) => (
                 <div key={s.label}>
@@ -329,8 +332,9 @@ function PatientHistory({
                         <p className="text-sm font-semibold text-slate-900">
                           Visit {i + 1}: <span className="font-mono">{v.lab_no}</span>{' '}
                           <span className="font-normal text-slate-600">
-                            ({formatRupees(v.paid_amount)} {PAYMENT_STATUS_META[v.payment_status].label})
+                            ({formatPaise(v.paid_amount_paise)} {PAYMENT_STATUS_META[v.payment_status].label})
                           </span>
+                          {v.cancelled_at && <CancelledBadge className="ml-2 align-middle" />}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {formatDate(v.created_at)}
@@ -340,17 +344,21 @@ function PatientHistory({
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right text-xs tabular-nums text-slate-600">
-                          <p>Billed {formatRupees(v.total_amount)}</p>
-                          {v.balance_due > 0 && <p className="font-medium text-amber-700">Due {formatRupees(v.balance_due)}</p>}
+                          <p>Billed {formatPaise(v.total_amount_paise)}</p>
+                          {v.balance_due_paise > 0 && (
+                            <p className="font-medium text-amber-700">Due {formatPaise(v.balance_due_paise)}</p>
+                          )}
                         </div>
                         <PaymentStatusBadge status={v.payment_status} />
-                        <PaymentActionButton
-                          label="Update"
-                          status={v.payment_status}
-                          locked={v.is_verified}
-                          canOverride={canOverride}
-                          onClick={() => onPay(toTarget(v))}
-                        />
+                        {!v.cancelled_at && (
+                          <PaymentActionButton
+                            label="Update"
+                            status={v.payment_status}
+                            locked={v.is_verified}
+                            canOverride={canOverride}
+                            onClick={() => onPay(toTarget(v))}
+                          />
+                        )}
                       </div>
                     </div>
                   </li>
@@ -506,7 +514,7 @@ export default function PaymentsPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           label="Today's Collection"
-          value={summary?.today_collection}
+          value={summary?.today_collection_paise}
           hint={summary ? `${summary.today_count} requisition(s) registered today` : 'All modes, today'}
           icon={Wallet}
           border="border-l-emerald-500"
@@ -515,8 +523,8 @@ export default function PaymentsPage() {
         />
         <KpiCard
           label="Range Collection"
-          value={summary?.filtered_collection}
-          hint={summary ? `${rangeLabel} - billed ${formatRupees(summary.filtered_billed)}` : rangeLabel}
+          value={summary?.filtered_collection_paise}
+          hint={summary ? `${rangeLabel} - billed ${formatPaise(summary.filtered_billed_paise)}` : rangeLabel}
           icon={BadgeIndianRupee}
           border="border-l-blue-500"
           tone="bg-blue-50 text-blue-600"
@@ -524,7 +532,7 @@ export default function PaymentsPage() {
         />
         <KpiCard
           label="Outstanding Dues"
-          value={summary?.total_outstanding}
+          value={summary?.total_outstanding_paise}
           hint="Unpaid balance in the selected range"
           icon={HandCoins}
           border="border-l-amber-500"
@@ -533,10 +541,10 @@ export default function PaymentsPage() {
         />
         <KpiCard
           label="Hospital Credit"
-          value={summary?.hospital_credit_total}
+          value={summary?.hospital_credit_total_paise}
           hint={
             summary
-              ? `${summary.hospital_credit_count} on credit - ${summary.exempt_count} exempt (${formatRupees(summary.exempt_total)} waived)`
+              ? `${summary.hospital_credit_count} on credit - ${summary.exempt_count} exempt (${formatPaise(summary.exempt_total_paise)} waived)`
               : 'Billed to the hospital'
           }
           icon={Landmark}
@@ -555,11 +563,11 @@ export default function PaymentsPage() {
                 {isNoCounterPayment(m.mode) && <span className="normal-case tracking-normal"> (billed)</span>}
               </p>
               <p className="text-base font-semibold tabular-nums text-slate-900">
-                {formatRupees(isNoCounterPayment(m.mode) ? m.billed : m.collected)}
+                {formatPaise(isNoCounterPayment(m.mode) ? m.billed_paise : m.collected_paise)}
               </p>
               <p className="text-xs text-muted-foreground">
                 {m.count} requisition(s)
-                {m.balance_due > 0 && <span className="text-amber-700"> - {formatRupees(m.balance_due)} due</span>}
+                {m.balance_due_paise > 0 && <span className="text-amber-700"> - {formatPaise(m.balance_due_paise)} due</span>}
               </p>
             </div>
           ))}
@@ -635,7 +643,7 @@ export default function PaymentsPage() {
                         id="pay_search"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Patient name, phone or lab no..."
+                        placeholder="Patient name, phone, lab no or referred by..."
                         className="pl-8"
                       />
                     </div>
@@ -704,7 +712,7 @@ export default function PaymentsPage() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1180px] text-sm">
+                <table className="w-full min-w-[1320px] text-sm">
                   <thead>
                     <tr className="border-b bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                       <th className="px-4 py-2.5">Lab No</th>
@@ -715,6 +723,7 @@ export default function PaymentsPage() {
                       <th className="px-4 py-2.5 text-right">Paid (₹)</th>
                       <th className="px-4 py-2.5 text-right">Balance Due (₹)</th>
                       <th className="px-4 py-2.5">Payment Mode</th>
+                      <th className="px-4 py-2.5">Referred By</th>
                       <th className="px-4 py-2.5">Status</th>
                       <th className="px-4 py-2.5 text-right">Actions</th>
                     </tr>
@@ -722,14 +731,14 @@ export default function PaymentsPage() {
                   <tbody className={cn('divide-y', loading && history && 'opacity-60')}>
                     {loading && !history && (
                       <tr>
-                        <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
+                        <td colSpan={11} className="px-4 py-10 text-center text-muted-foreground">
                           <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading transactions...
                         </td>
                       </tr>
                     )}
                     {history && history.items.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                        <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                           <Inbox className="mx-auto mb-2 h-8 w-8 text-slate-300" />
                           No transactions match these filters for {rangeLabel}.
                         </td>
@@ -737,33 +746,41 @@ export default function PaymentsPage() {
                     )}
                     {history?.items.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-50/70">
-                        <td className="whitespace-nowrap px-4 py-3 font-mono font-semibold text-slate-900">{t.lab_no}</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-mono font-semibold text-slate-900">
+                          {t.lab_no}
+                          {t.cancelled_at && <CancelledBadge className="ml-2 font-sans" />}
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDateTime(t.created_at)}</td>
                         <td className="px-4 py-3 font-medium text-slate-900">{t.patient_name}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-600">{t.phone || '-'}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{formatRupees(t.total_amount)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-emerald-700">{formatRupees(t.paid_amount)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{formatPaise(t.total_amount_paise)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-emerald-700">
+                          {formatPaise(t.paid_amount_paise)}
+                        </td>
                         <td
                           className={cn(
                             'whitespace-nowrap px-4 py-3 text-right tabular-nums',
-                            t.balance_due > 0 ? 'font-semibold text-amber-700' : 'text-slate-400',
+                            t.balance_due_paise > 0 ? 'font-semibold text-amber-700' : 'text-slate-400',
                           )}
                         >
-                          {formatRupees(t.balance_due)}
+                          {formatPaise(t.balance_due_paise)}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-600">{modeName(t.payment_mode)}</td>
+                        <td className="max-w-[14rem] px-4 py-3 text-slate-600">{referredBy(t)}</td>
                         <td className="px-4 py-3">
                           <PaymentStatusBadge status={t.payment_status} />
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
-                            <PaymentActionButton
-                              label="Update Payment"
-                              status={t.payment_status}
-                              locked={t.is_verified}
-                              canOverride={canOverride}
-                              onClick={() => setPaymentTarget(toTarget(t))}
-                            />
+                            {!t.cancelled_at && (
+                              <PaymentActionButton
+                                label="Update Payment"
+                                status={t.payment_status}
+                                locked={t.is_verified}
+                                canOverride={canOverride}
+                                onClick={() => setPaymentTarget(toTarget(t))}
+                              />
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
