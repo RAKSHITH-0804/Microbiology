@@ -601,7 +601,9 @@ export default function RequisitionFormPage() {
             <NativeSelect id="hospital" aria-invalid={!!errors.hospital} {...register('hospital')}>
               <option value="">Select hospital</option>
               {HOSPITALS.map((h) => (
-                <option key={h} value={h}>{h}</option>
+                <option key={h.value} value={h.value}>
+                  {h.label}
+                </option>
               ))}
             </NativeSelect>
           </FormField>

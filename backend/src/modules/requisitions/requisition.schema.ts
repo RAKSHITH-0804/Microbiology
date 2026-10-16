@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { reasonText } from '../reports/report.schema';
 import { PAYMENT_STATUSES, paymentFields } from './payment';
 
-export const HOSPITALS = ['CGH', 'BH', 'PVT', 'WCH', 'Other'] as const;
+/** Short codes stored on the requisition; the form shows longer labels for the same values. */
+export const HOSPITALS = ['CGH', 'BH', 'PVT', 'WCH', 'BCHI&RC', 'Other'] as const;
 
 const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 

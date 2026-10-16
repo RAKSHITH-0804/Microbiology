@@ -1,5 +1,14 @@
-export const HOSPITALS = ['CGH', 'BH', 'PVT', 'WCH', 'Other'] as const;
-export type Hospital = (typeof HOSPITALS)[number];
+/** Short code is stored; full name is shown only in the requisition form dropdown. */
+export const HOSPITALS = [
+  { value: 'CGH', label: 'Chigateri Government Hospital (CGH)' },
+  { value: 'BH', label: 'Bapuji Hospital (BH)' },
+  { value: 'PVT', label: 'Private Hospital (PVT)' },
+  { value: 'WCH', label: 'Women & Children Hospital (WCH)' },
+  { value: 'BCHI&RC', label: 'Bapuji Child Health Institute & Research Center (BCHI&RC)' },
+  { value: 'Other', label: 'Other' },
+] as const;
+export type Hospital = (typeof HOSPITALS)[number]['value'];
+export const HOSPITAL_CODES: readonly Hospital[] = HOSPITALS.map((h) => h.value);
 
 export type AgeUnit = 'Y' | 'M' | 'D';
 export type Sex = 'M' | 'F' | 'Other';

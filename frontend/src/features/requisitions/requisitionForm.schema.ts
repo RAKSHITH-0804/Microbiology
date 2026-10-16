@@ -63,7 +63,7 @@ const requisitionFormFields = z
     consultant_doctor: text(150),
     op_ip_no: text(50),
     ward_unit: text(100),
-    hospital: z.string().refine((v) => (HOSPITALS as readonly string[]).includes(v), 'Select a hospital'),
+    hospital: z.string().refine((v) => HOSPITALS.some((h) => h.value === v), 'Select a hospital'),
     hospital_other: text(150),
     clinical_diagnosis: text(2000),
     preferred_antibiotics: text(500),
@@ -168,7 +168,7 @@ export function ageFormFromPatient(p: PendingRequisition['patient']): Requisitio
 /** Form values for editing a saved requisition. */
 export function fromRequisition(r: PendingRequisition): RequisitionFormValues {
   const p = r.patient;
-  const knownHospital = HOSPITALS.find((h) => h !== 'Other' && h === r.hospital);
+  const knownHospital = HOSPITALS.find((h) => h.value !== 'Other' && h.value === r.hospital)?.value;
   const localDateTime = (iso: string | null) => (iso ? toDateTimeLocal(new Date(iso)) : '');
 
   return {
