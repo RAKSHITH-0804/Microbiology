@@ -311,29 +311,29 @@ export default function GeneralReportPage() {
       {requisition && !printable && <NothingToPrintNotice />}
       {requisition && printable && (
         <ReportPrintLayout
-          title="Microbiology Report"
+          title="Culture & Sensitivity Report"
           requisition={requisition}
           reportingDateTime={requisition.general_report?.reporting_datetime ?? null}
           draft={draft}
           preparedBy={staffById(values.prepared_by)}
           reportedBy={staffById(values.reported_by)}
         >
-          <table className="w-full border-collapse text-[11pt]">
+          <table className="print-report-meta">
             <tbody>
               <tr>
-                <td className="w-[28%] py-1 align-top font-bold">Specimen</td>
-                <td className="w-[3%] py-1 align-top">:</td>
-                <td className="py-1 align-top">{values.specimen || '-'}</td>
+                <td className="w-[28%] font-bold">Specimen</td>
+                <td className="w-[3%]">:</td>
+                <td>{values.specimen || '-'}</td>
               </tr>
               <tr>
-                <td className="py-1 align-top font-bold">Investigation Done</td>
-                <td className="py-1 align-top">:</td>
-                <td className="py-1 align-top">{values.investigation_done || '-'}</td>
+                <td className="font-bold">Investigation Done</td>
+                <td>:</td>
+                <td>{values.investigation_done || '-'}</td>
               </tr>
             </tbody>
           </table>
-          <p className="mt-4 font-bold underline underline-offset-2">Report</p>
-          <div className="mt-2 whitespace-pre-wrap text-[11.5pt] leading-relaxed">{values.report_findings}</div>
+          <p className="print-report-section-title">Report</p>
+          <div className="print-report-findings">{values.report_findings}</div>
         </ReportPrintLayout>
       )}
     </>

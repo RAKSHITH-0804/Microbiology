@@ -755,23 +755,18 @@ export default function AntibiogramReportPage() {
           preparedBy={staffById(values.prepared_by)}
           reportedBy={staffById(values.reported_by)}
         >
-          <table className="w-full border-collapse text-[11pt]">
+          <table className="print-report-meta">
             <tbody>
               <tr>
-                <td className="w-[28%] py-1 align-top font-bold">Specimen</td>
-                <td className="w-[3%] py-1 align-top">:</td>
-                <td className="py-1 align-top">{inheritedSpecimen(requisition) || '-'}</td>
-              </tr>
-              <tr>
-                <td className="py-1 align-top font-bold">Investigation Done</td>
-                <td className="py-1 align-top">:</td>
-                <td className="py-1 align-top">{inheritedInvestigation(requisition) || '-'}</td>
+                <td className="w-[28%] font-semibold">Specimen</td>
+                <td className="w-[3%]">:</td>
+                <td>{inheritedSpecimen(requisition) || '-'}</td>
               </tr>
               {growth && values.grams_stain_remark.trim() && (
                 <tr>
-                  <td className="py-1 align-top font-bold">Antibiogram</td>
-                  <td className="py-1 align-top">:</td>
-                  <td className="whitespace-pre-wrap py-1 align-top">{values.grams_stain_remark}</td>
+                  <td className="font-semibold">Antibiogram</td>
+                  <td>:</td>
+                  <td className="whitespace-pre-wrap">{values.grams_stain_remark}</td>
                 </tr>
               )}
             </tbody>
@@ -779,8 +774,8 @@ export default function AntibiogramReportPage() {
 
           {!growth && (
             <>
-              <p className="mt-4 font-bold underline underline-offset-2">Report</p>
-              <div className="mt-2 whitespace-pre-wrap text-[11.5pt] leading-relaxed">
+              <p className="print-report-section-title">Report</p>
+              <div className="print-report-findings">
                 {values.culture_text.trim() || DEFAULT_NO_GROWTH_TEXT}
               </div>
             </>

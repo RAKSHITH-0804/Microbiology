@@ -36,3 +36,10 @@ export const formatDate = (iso: string | null | undefined) => (iso ? format(new 
 
 /** Adds the "Dr." title unless the stored name already carries it (e.g. "Dr.Usha.M.G"). */
 export const formatDoctorName = (name: string) => (/^dr\b/i.test(name.trim()) ? name.trim() : `Dr. ${name.trim()}`);
+
+/** Print signature title under "Reported by"; falls back when designation is missing. */
+export function formatDoctorDesignation(designation: string | null | undefined): string {
+  const cleaned = designation?.trim();
+  if (!cleaned) return 'REPORTING DOCTOR';
+  return cleaned.toUpperCase();
+}
