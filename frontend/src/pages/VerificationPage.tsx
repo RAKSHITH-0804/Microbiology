@@ -133,49 +133,62 @@ function ReviewDialog({
                   )}
 
                   {report.report_type === 'antibiogram' && antibiogram && (
-                    <section className="space-y-3">
+                    <section className="space-y-4">
                       <dl className="grid gap-3 sm:grid-cols-2">
-                        <Field label="Organism Isolated" value={antibiogram.organism_isolated} />
+                        <Field
+                          label="Culture Status"
+                          value={
+                            (antibiogram.culture_status ?? antibiogram.antibiogram_data?.culture_status) === 'NO_GROWTH'
+                              ? 'No Growth / Sterile'
+                              : 'Growth / Organisms Isolated'
+                          }
+                        />
                         <Field label="Antibiogram" value={antibiogram.grams_stain_remark} />
                       </dl>
-                      <div className="overflow-hidden rounded-lg border">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              <th className="w-12 px-3 py-2 text-center">#</th>
-                              <th className="px-3 py-2">Antibiotic</th>
-                              {SENSITIVITY_OPTIONS.map((o) => (
-                                <th key={o.value} className="w-28 px-3 py-2 text-center">{o.label}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {antibiogram.results.map((r, i) => (
-                              <tr key={r.antibiotic_name}>
-                                <td className="px-3 py-1.5 text-center text-slate-500">{i + 1}</td>
-                                <td className="px-3 py-1.5 font-medium">{r.antibiotic_name}</td>
-                                {SENSITIVITY_OPTIONS.map((o) => (
-                                  <td key={o.value} className="px-3 py-1.5 text-center">
-                                    {r.sensitivity_result === o.value && (
-                                      <span
-                                        className={
-                                          o.value === 'S'
-                                            ? 'font-bold text-emerald-600'
-                                            : o.value === 'R'
-                                              ? 'font-bold text-red-600'
-                                              : 'font-bold text-amber-600'
-                                        }
-                                      >
-                                        {o.short}
-                                      </span>
-                                    )}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                      {(antibiogram.culture_status ?? antibiogram.antibiogram_data?.culture_status) === 'NO_GROWTH' ? (
+                        <div>
+                          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Culture Findings</p>
+                          <div className="whitespace-pre-wrap rounded-lg border bg-white p-4 font-serif text-[15px] leading-relaxed">
+                            {antibiogram.culture_text ??
+                              antibiogram.antibiogram_data?.culture_text ??
+                              antibiogram.organism_isolated}
+                          </div>
+                        </div>
+                      ) : (
+                        (antibiogram.organisms ?? antibiogram.antibiogram_data?.organisms ?? [
+                          { organism_name: antibiogram.organism_isolated ?? 'Organism', results: antibiogram.results },
+                        ]).map((org, oi) => (
+                          <div key={`${org.organism_name}-${oi}`} className="space-y-2">
+                            <p className="text-sm font-semibold text-slate-800">
+                              {oi + 1}. Organism Isolated:{' '}
+                              <span className="italic">{org.organism_name || '-'}</span>
+                            </p>
+                            <div className="overflow-hidden rounded-lg border">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    <th className="w-12 px-3 py-2 text-center">#</th>
+                                    <th className="px-3 py-2">Antibiotic</th>
+                                    <th className="w-36 px-3 py-2">Result</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {org.results.map((r, i) => (
+                                    <tr key={`${org.organism_name}-${r.antibiotic_name}`}>
+                                      <td className="px-3 py-1.5 text-center text-slate-500">{i + 1}</td>
+                                      <td className="px-3 py-1.5 font-medium">{r.antibiotic_name}</td>
+                                      <td className="px-3 py-1.5 font-semibold">
+                                        {SENSITIVITY_OPTIONS.find((o) => o.value === r.sensitivity_result)?.label ??
+                                          r.sensitivity_result}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </section>
                   )}
                 </>

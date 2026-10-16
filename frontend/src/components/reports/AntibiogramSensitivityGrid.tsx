@@ -17,10 +17,13 @@ const REMARK_EXTRA_LINE = 21;
 const FOOTER_VERIFIED = 190;
 const FOOTER_DRAFT = 90;
 const HEADING_FIRST = 28;
-const HEADING_CONTINUED = 51;
+const HEADING_CONTINUED = 28;
+const ORGANISM_HEADER = 36;
 const THEAD = 40;
 const GRID_GAP = 16;
 const ROW_BORDER = 0.8;
+/** Compact patient header repeated at the top of every continuation print page. */
+const CONTINUATION_HEADER = 78;
 
 /**
  * Row density by report size, so short lists spread out instead of sitting in stubby half-width tables.
@@ -71,6 +74,21 @@ export interface SensitivityRow {
   sensitivity_result: SensitivityResult | null;
 }
 
+export interface OrganismPrintBlock {
+  organism_name: string;
+  results: SensitivityRow[];
+}
+
+/** Fields shown in the compact header on page 2+ of a multi-page antibiogram printout. */
+export interface ContinuationPatientHeader {
+  patientName: string;
+  ageSex: string;
+  labNo: string;
+  receiptNo: string;
+  sample: string;
+  date: string;
+}
+
 let measureCtx: CanvasRenderingContext2D | null | undefined;
 
 function textWidth(text: string, font: string): number {
@@ -111,10 +129,11 @@ function rowHeight(name: string, dual: boolean, d: Density): number {
 const isSingleTable = (count: number, d: Density) => d === RELAXED || count <= SINGLE_TABLE_MAX;
 
 /** Printed height of one page's sensitivity section, laid out as it will render. */
-function sectionHeight(items: readonly SensitivityRow[], first: boolean, d: Density): number {
+function sectionHeight(items: readonly SensitivityRow[], first: boolean, d: Density, withOrganismHeader: boolean): number {
   const heading = first ? HEADING_FIRST : HEADING_CONTINUED;
+  const orgHeader = withOrganismHeader ? ORGANISM_HEADER : 0;
   if (isSingleTable(items.length, d)) {
-    return heading + THEAD + items.reduce((h, r) => h + rowHeight(r.antibiotic_name, false, d), 0);
+    return orgHeader + heading + THEAD + items.reduce((h, r) => h + rowHeight(r.antibiotic_name, false, d), 0);
   }
   const mid = Math.ceil(items.length / 2);
   let rows = 0;
@@ -125,7 +144,7 @@ function sectionHeight(items: readonly SensitivityRow[], first: boolean, d: Dens
       right ? rowHeight(right.antibiotic_name, true, d) : 0,
     );
   }
-  return heading + THEAD + rows;
+  return orgHeader + heading + THEAD + rows;
 }
 
 export interface PrintChrome {
@@ -146,26 +165,33 @@ function firstPageTop({ draft, remark }: PrintChrome): number {
 }
 
 /**
- * Splits the antibiotics into printed pages by available height: every page is filled as far as it fits,
- * and the last page keeps room for "End of Report" and the signatures.
+ * Splits one organism's antibiotics into printed pages by available height.
+ * `startsOnContinuationPage` is true when this organism's first page is already a print page-break
+ * (page 2+), so the compact patient header must be reserved in the budget.
  */
-export function paginateAntibiotics(items: readonly SensitivityRow[], chrome: PrintChrome): SensitivityRow[][] {
+export function paginateAntibiotics(
+  items: readonly SensitivityRow[],
+  chrome: PrintChrome,
+  opts?: { withOrganismHeader?: boolean; startsOnContinuationPage?: boolean },
+): SensitivityRow[][] {
   const footer = chrome.draft ? FOOTER_DRAFT : FOOTER_VERIFIED;
   const density = densityFor(items.length);
+  const withOrganismHeader = opts?.withOrganismHeader ?? false;
+  const startsOnContinuationPage = opts?.startsOnContinuationPage ?? false;
   const pages: SensitivityRow[][] = [];
   let i = 0;
   while (i < items.length) {
     const first = pages.length === 0;
-    const budget = PAGE_HEIGHT - SAFETY - (first ? firstPageTop(chrome) : 0);
+    const pageTop =
+      first && !startsOnContinuationPage ? firstPageTop(chrome) : CONTINUATION_HEADER;
+    const budget = PAGE_HEIGHT - SAFETY - pageTop;
     const fits = (count: number, reserve: number) =>
-      sectionHeight(items.slice(i, i + count), first, density) + reserve <= budget;
+      sectionHeight(items.slice(i, i + count), first, density, withOrganismHeader && first) + reserve <= budget;
 
     let take = 1;
     while (i + take < items.length && fits(take + 1, 0)) take += 1;
 
     if (take > 1 && i + take === items.length && !fits(take, footer)) {
-      // Everything left fits, but not together with the signatures. The signatures then go to a final page,
-      // so keep this page as full as possible and carry only a short tail along with them.
       let withFooter = take;
       while (withFooter > 1 && !fits(withFooter, footer)) withFooter -= 1;
       take = Math.max(withFooter, take - MIN_LAST_PAGE_ITEMS);
@@ -173,11 +199,52 @@ export function paginateAntibiotics(items: readonly SensitivityRow[], chrome: Pr
     pages.push(items.slice(i, i + take));
     i += take;
   }
-  return pages;
+  return pages.length ? pages : [[]];
 }
 
 function resultLabel(result: SensitivityResult | null): string {
   return result ? RESULT_LABEL[result] : '';
+}
+
+function CompactPatientHeaderBox({ patient }: { patient: ContinuationPatientHeader }) {
+  return (
+    <div className="antibiogram-continuation-header">
+      <table className="antibiogram-continuation-table">
+        <tbody>
+          <tr>
+            <td>
+              <span className="antibiogram-continuation-label">Patient Name</span>
+              <span className="antibiogram-continuation-value">{patient.patientName || '-'}</span>
+            </td>
+            <td>
+              <span className="antibiogram-continuation-label">Age / Sex</span>
+              <span className="antibiogram-continuation-value">{patient.ageSex || '-'}</span>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <span className="antibiogram-continuation-label">Lab No</span>
+              <span className="antibiogram-continuation-value">{patient.labNo || '-'}</span>
+            </td>
+            <td>
+              <span className="antibiogram-continuation-label">Receipt No</span>
+              <span className="antibiogram-continuation-value">{patient.receiptNo || '-'}</span>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <span className="antibiogram-continuation-label">Sample / Specimen</span>
+              <span className="antibiogram-continuation-value">{patient.sample || '-'}</span>
+            </td>
+            <td>
+              <span className="antibiogram-continuation-label">Date</span>
+              <span className="antibiogram-continuation-value">{patient.date || '-'}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function SensitivityTable({
@@ -207,7 +274,7 @@ function SensitivityTable({
       </thead>
       <tbody>
         {rows.map((r, i) => (
-          <tr key={r.antibiotic_name}>
+          <tr key={`${r.antibiotic_name}-${offset + i}`}>
             <td>{offset + i + 1}</td>
             <td className="antibiogram-name">{r.antibiotic_name}</td>
             <td className="antibiogram-result">{resultLabel(r.sensitivity_result)}</td>
@@ -218,36 +285,53 @@ function SensitivityTable({
   );
 }
 
-/**
- * Printed sensitivity pattern, spanning the full body width. Up to 6 antibiotics print as one roomy
- * full-width table; larger reports split each page evenly into two side-by-side tables (left takes the
- * extra row when the count is odd), with tighter rows for long lists. Pages are filled by available
- * height and numbering runs on across tables and pages.
- *
- * Each table has three columns: SL No, Name of Antibiotics, and Result (full word: Sensitive /
- * Resistant / Mod. Sensitive).
- */
-export function AntibiogramSensitivityGrid({ results, ...chrome }: { results: SensitivityRow[] } & PrintChrome) {
-  const pages = paginateAntibiotics(results, chrome);
+function OrganismSensitivitySection({
+  index,
+  organismName,
+  results,
+  chrome,
+  isFirstSection,
+  continuationPatient,
+}: {
+  index: number;
+  organismName: string;
+  results: SensitivityRow[];
+  chrome: PrintChrome;
+  isFirstSection: boolean;
+  continuationPatient?: ContinuationPatientHeader;
+}) {
   const density = densityFor(results.length);
+  const pages = paginateAntibiotics(results, isFirstSection ? chrome : { draft: chrome.draft }, {
+    withOrganismHeader: true,
+    startsOnContinuationPage: !isFirstSection,
+  });
   let offset = 0;
 
   return (
-    <div className="antibiogram-print-body">
-      {pages.length === 0 && (
-        <>
-          <p className="antibiogram-heading">Antibiotic Sensitivity Pattern</p>
-          <p className="text-[10pt] italic">No antibiotics recorded.</p>
-        </>
-      )}
+    <div className="antibiogram-organism-section">
       {pages.map((page, p) => {
         const start = offset;
         offset += page.length;
         const mid = Math.ceil(page.length / 2);
+        const showOrganismHeader = p === 0;
+        const isContinuation = !isFirstSection || p > 0;
         return (
-          <section key={start} className={cn('antibiogram-page', p > 0 && 'antibiogram-page--continued')}>
-            <p className="antibiogram-heading">Antibiotic Sensitivity Pattern{p > 0 && ' (continued)'}</p>
-            {isSingleTable(page.length, density) ? (
+          <section
+            key={`${index}-${start}`}
+            className={cn('antibiogram-page', isContinuation && 'antibiogram-page--continued')}
+          >
+            {isContinuation && continuationPatient && <CompactPatientHeaderBox patient={continuationPatient} />}
+            {showOrganismHeader && (
+              <p className="antibiogram-organism-heading">
+                {index}. Organism Isolated: <span className="italic">{organismName || '-'}</span>
+              </p>
+            )}
+            <p className="antibiogram-heading">
+              Antibiotic Sensitivity Pattern{p > 0 && ' (continued)'}
+            </p>
+            {page.length === 0 ? (
+              <p className="text-[10pt] italic">No antibiotics recorded.</p>
+            ) : isSingleTable(page.length, density) ? (
               <SensitivityTable rows={page} offset={start} dual={false} density={density} />
             ) : (
               <div className="antibiogram-grid">
@@ -258,6 +342,85 @@ export function AntibiogramSensitivityGrid({ results, ...chrome }: { results: Se
           </section>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Printed sensitivity pattern for one or more organisms. Each organism gets its own heading and
+ * independent 3-column table(s). Density and 50/50 dual layout still apply per organism.
+ */
+export function AntibiogramSensitivityGrid({
+  organisms,
+  results,
+  continuationPatient,
+  ...chrome
+}: {
+  organisms?: OrganismPrintBlock[];
+  /** @deprecated Prefer `organisms`; treated as a single unnamed block when organisms is omitted. */
+  results?: SensitivityRow[];
+  /** Compact patient details printed at the top of every page after page 1. */
+  continuationPatient?: ContinuationPatientHeader;
+} & PrintChrome) {
+  const blocks: OrganismPrintBlock[] =
+    organisms && organisms.length
+      ? organisms
+      : results
+        ? [{ organism_name: '', results }]
+        : [];
+
+  if (blocks.length === 0) {
+    return (
+      <div className="antibiogram-print-body">
+        <p className="antibiogram-heading">Antibiotic Sensitivity Pattern</p>
+        <p className="text-[10pt] italic">No antibiotics recorded.</p>
+      </div>
+    );
+  }
+
+  // Single legacy block without an organism name keeps the previous heading-only layout.
+  if (blocks.length === 1 && !blocks[0].organism_name.trim()) {
+    const density = densityFor(blocks[0].results.length);
+    const pages = paginateAntibiotics(blocks[0].results, chrome);
+    let offset = 0;
+    return (
+      <div className="antibiogram-print-body">
+        {pages.map((page, p) => {
+          const start = offset;
+          offset += page.length;
+          const mid = Math.ceil(page.length / 2);
+          return (
+            <section key={start} className={cn('antibiogram-page', p > 0 && 'antibiogram-page--continued')}>
+              {p > 0 && continuationPatient && <CompactPatientHeaderBox patient={continuationPatient} />}
+              <p className="antibiogram-heading">Antibiotic Sensitivity Pattern{p > 0 && ' (continued)'}</p>
+              {isSingleTable(page.length, density) ? (
+                <SensitivityTable rows={page} offset={start} dual={false} density={density} />
+              ) : (
+                <div className="antibiogram-grid">
+                  <SensitivityTable rows={page.slice(0, mid)} offset={start} dual density={density} />
+                  <SensitivityTable rows={page.slice(mid)} offset={start + mid} dual density={density} />
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="antibiogram-print-body">
+      {blocks.map((block, i) => (
+        <OrganismSensitivitySection
+          key={`${i}-${block.organism_name}`}
+          index={i + 1}
+          organismName={block.organism_name}
+          results={block.results}
+          chrome={chrome}
+          isFirstSection={i === 0}
+          continuationPatient={continuationPatient}
+        />
+      ))}
     </div>
   );
 }

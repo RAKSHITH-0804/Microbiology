@@ -7,6 +7,7 @@ import { AuthUser } from '../../utils/jwt';
 import { assertNotCancelled, REPORT_LOCKED_MESSAGE } from '../../utils/reportLock';
 import { PaymentStatus, RELEASED_PAYMENT_STATUSES } from '../requisitions/payment';
 import { assignedToDoctor } from '../requisitions/requisition.controller';
+import { parseAntibiogramData, toStoredAntibiogram } from './antibiogramData';
 import {
   AntibiogramReportInput,
   GeneralReportInput,
@@ -99,12 +100,51 @@ async function assertStaff(client: PoolClient, preparedBy: number, reportedBy: n
   if (Object.keys(errors).length) throw new AppError(400, 'Invalid staff selection', errors);
 }
 
+/** Validates only the staff ids that were supplied (NO_GROWTH may omit either signatory). */
+async function assertOptionalStaff(client: PoolClient, preparedBy: number | null, reportedBy: number | null) {
+  const ids = [preparedBy, reportedBy].filter((id): id is number => id !== null);
+  if (!ids.length) return;
+  const { rows } = await client.query<{ id: number }>(
+    'SELECT id FROM master_staff WHERE is_active AND id = ANY($1::int[])',
+    [ids],
+  );
+  const found = new Set(rows.map((r) => r.id));
+  const errors: Record<string, string[]> = {};
+  if (preparedBy !== null && !found.has(preparedBy)) errors.prepared_by = ['Unknown staff member'];
+  if (reportedBy !== null && !found.has(reportedBy)) errors.reported_by = ['Unknown staff member'];
+  if (Object.keys(errors).length) throw new AppError(400, 'Invalid staff selection', errors);
+}
+
 /** A saved report always leaves the requisition awaiting verification (only the HOD can save on a verified one). */
 async function markReportEntered(client: PoolClient, requisitionId: number) {
   await client.query(
     `UPDATE requisitions SET status = 'REPORT_ENTERED' WHERE id = $1 AND status IN ('RECEIVED', 'VERIFIED')`,
     [requisitionId],
   );
+}
+
+/**
+ * Marks the report verified and sets the requisition to VERIFIED when no other report is still pending.
+ * Used for NO_GROWTH cultures that clear the worklist immediately on save.
+ */
+async function autoVerifyAntibiogram(client: PoolClient, reportId: number, requisitionId: number, verifiedBy: number | null) {
+  await client.query(
+    `UPDATE antibiogram_reports
+     SET is_verified = TRUE, verified_by = $2, verified_at = NOW()
+     WHERE id = $1`,
+    [reportId, verifiedBy],
+  );
+  const status = await client.query<{ status: string }>(
+    `UPDATE requisitions r
+     SET status = CASE
+       WHEN EXISTS (SELECT 1 FROM general_reports WHERE requisition_id = r.id AND NOT is_verified)
+         OR EXISTS (SELECT 1 FROM antibiogram_reports WHERE requisition_id = r.id AND NOT is_verified)
+       THEN r.status ELSE 'VERIFIED' END
+     WHERE r.id = $1
+     RETURNING r.status`,
+    [requisitionId],
+  );
+  return status.rows[0].status;
 }
 
 type ExistingReport = VerifiedReport & { is_verified: boolean } & Record<string, unknown>;
@@ -217,7 +257,7 @@ const savedMessage = (kind: string, report: { lab_no: string; verification_reset
 /** Per-antibiotic differences, e.g. "Sensitivity: Amikacin" S -> R; added and removed rows show an empty side. */
 function sensitivityChanges(
   before: { antibiotic_name: string; sensitivity_result: string }[],
-  after: AntibiogramReportInput['results'],
+  after: { antibiotic_name: string; sensitivity_result: string }[],
 ): ChangeMap {
   const changes: ChangeMap = {};
   const old = new Map(before.map((r) => [r.antibiotic_name.toLowerCase(), r]));
@@ -232,60 +272,134 @@ function sensitivityChanges(
   return changes;
 }
 
-const ANTIBIOGRAM_FIELDS = ['organism_isolated', 'grams_stain_remark', 'prepared_by', 'reported_by'] as const;
+const ANTIBIOGRAM_FIELDS = ['organism_isolated', 'grams_stain_remark', 'prepared_by', 'reported_by', 'antibiogram_data'] as const;
+
+function flattenSensitivityForDiff(
+  rows: { organism_name?: string | null; antibiotic_name: string; sensitivity_result: string }[],
+) {
+  return rows.map((r) => ({
+    antibiotic_name: r.organism_name ? `${r.organism_name}::${r.antibiotic_name}` : r.antibiotic_name,
+    sensitivity_result: r.sensitivity_result,
+  }));
+}
 
 export async function saveAntibiogramReport(req: Request, res: Response) {
   const input = req.body as AntibiogramReportInput;
   const userId = req.user!.sub;
+  const user = req.user!;
+  const stored = toStoredAntibiogram(input);
+  const noGrowth = input.culture_status === 'NO_GROWTH';
+  // Prefer the posted signatory; for NO_GROWTH fall back to the acting user's staff link when present.
+  const preparedBy = input.prepared_by ?? (noGrowth ? user.staff_id : null);
+  const reportedBy =
+    input.reported_by ??
+    (noGrowth && (user.role === 'DOCTOR' || user.role === 'HOD') ? user.staff_id : null);
 
   const report = await withTransaction(async (client) => {
-    const requisition = await lockEditableRequisition(client, input.requisition_id, 'antibiogram_reports', req.user!);
-    await assertDoctorAuthorship(client, req.user!, 'antibiogram_reports', input.requisition_id, input.reported_by);
-    await assertStaff(client, input.prepared_by, input.reported_by);
+    const requisition = await lockEditableRequisition(client, input.requisition_id, 'antibiogram_reports', user);
+    if (!noGrowth) {
+      if (!preparedBy || !reportedBy) {
+        throw new AppError(400, 'Prepared by and Reported by are required for growth cultures');
+      }
+      await assertDoctorAuthorship(client, user, 'antibiogram_reports', input.requisition_id, reportedBy);
+      await assertStaff(client, preparedBy, reportedBy);
+    } else {
+      await assertOptionalStaff(client, preparedBy, reportedBy);
+    }
 
     const before = await existingReport(client, 'antibiogram_reports', input.requisition_id, ANTIBIOGRAM_FIELDS);
     const beforeResults = before
       ? (
-          await client.query<{ antibiotic_name: string; sensitivity_result: string }>(
-            'SELECT antibiotic_name, sensitivity_result FROM antibiogram_results WHERE antibiogram_report_id = $1 ORDER BY id',
+          await client.query<{ organism_name: string | null; antibiotic_name: string; sensitivity_result: string }>(
+            `SELECT organism_name, antibiotic_name, sensitivity_result
+             FROM antibiogram_results WHERE antibiogram_report_id = $1 ORDER BY id`,
             [before.id],
           )
         ).rows
       : [];
+    const afterFlat = flattenSensitivityForDiff(stored.flatResults);
     const changes = {
       ...(await diffFields(client, before, {
-        organism_isolated: input.organism_isolated,
+        organism_isolated: stored.organism_isolated,
         grams_stain_remark: input.grams_stain_remark,
-        prepared_by: input.prepared_by,
-        reported_by: input.reported_by,
+        prepared_by: preparedBy,
+        reported_by: reportedBy,
       })),
-      ...sensitivityChanges(beforeResults, input.results),
+      ...(before?.antibiogram_data || input.culture_status
+        ? {
+            'Culture status': {
+              from: parseAntibiogramData(before?.antibiogram_data, {
+                organism_isolated: before?.organism_isolated as string | null,
+              }).culture_status,
+              to: stored.data.culture_status,
+            },
+          }
+        : {}),
+      ...sensitivityChanges(flattenSensitivityForDiff(beforeResults), afterFlat),
     };
+    // Drop no-op culture status when unchanged.
+    if (
+      changes['Culture status'] &&
+      (changes['Culture status'] as { from: unknown; to: unknown }).from ===
+        (changes['Culture status'] as { from: unknown; to: unknown }).to
+    ) {
+      delete changes['Culture status'];
+    }
     if (before?.is_verified && !Object.keys(changes).length) throw new AppError(409, UNCHANGED_VERIFIED_MESSAGE);
 
     const { rows } = await client.query<{ id: number; created: boolean; reporting_datetime: Date }>(
-      `INSERT INTO antibiogram_reports (requisition_id, organism_isolated, grams_stain_remark, prepared_by, reported_by)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO antibiogram_reports
+         (requisition_id, organism_isolated, grams_stain_remark, prepared_by, reported_by, antibiogram_data)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
        ON CONFLICT (requisition_id) DO UPDATE SET
          organism_isolated = EXCLUDED.organism_isolated,
          grams_stain_remark = EXCLUDED.grams_stain_remark,
          prepared_by = EXCLUDED.prepared_by,
          reported_by = EXCLUDED.reported_by,
-         reporting_datetime = NOW()
+         antibiogram_data = EXCLUDED.antibiogram_data,
+         reporting_datetime = NOW(),
+         is_verified = FALSE,
+         verified_by = NULL,
+         verified_at = NULL
        RETURNING id, (xmax = 0) AS created, reporting_datetime`,
-      [input.requisition_id, input.organism_isolated, input.grams_stain_remark, input.prepared_by, input.reported_by],
+      [
+        input.requisition_id,
+        stored.organism_isolated,
+        input.grams_stain_remark,
+        preparedBy,
+        reportedBy,
+        JSON.stringify(stored.data),
+      ],
     );
     const reportId = rows[0].id;
 
     await client.query('DELETE FROM antibiogram_results WHERE antibiogram_report_id = $1', [reportId]);
-    await client.query(
-      `INSERT INTO antibiogram_results (antibiogram_report_id, antibiotic_name, sensitivity_result)
-       SELECT $1, name, result::sensitivity_result
-       FROM UNNEST($2::text[], $3::text[]) WITH ORDINALITY AS r(name, result, ord)
-       ORDER BY ord`,
-      [reportId, input.results.map((r) => r.antibiotic_name), input.results.map((r) => r.sensitivity_result)],
-    );
-    await markReportEntered(client, input.requisition_id);
+    if (stored.flatResults.length) {
+      await client.query(
+        `INSERT INTO antibiogram_results (antibiogram_report_id, organism_name, antibiotic_name, sensitivity_result)
+         SELECT $1, organism, name, result::sensitivity_result
+         FROM UNNEST($2::text[], $3::text[], $4::text[]) WITH ORDINALITY AS r(organism, name, result, ord)
+         ORDER BY ord`,
+        [
+          reportId,
+          stored.flatResults.map((r) => r.organism_name),
+          stored.flatResults.map((r) => r.antibiotic_name),
+          stored.flatResults.map((r) => r.sensitivity_result),
+        ],
+      );
+    }
+
+    let requisitionStatus = 'REPORT_ENTERED';
+    let isVerified = false;
+    let verificationReset = false;
+    if (noGrowth) {
+      // Sterile cultures clear the worklist and verification queue immediately.
+      requisitionStatus = await autoVerifyAntibiogram(client, reportId, input.requisition_id, user.staff_id);
+      isVerified = true;
+    } else {
+      await markReportEntered(client, input.requisition_id);
+      verificationReset = await resetAfterCorrection(client, user, 'antibiogram_reports', before, requisition, changes);
+    }
 
     await writeAuditLog(
       {
@@ -296,27 +410,36 @@ export async function saveAntibiogramReport(req: Request, res: Response) {
         details: {
           requisition_id: requisition.id,
           lab_no: requisition.lab_no,
-          organism: input.organism_isolated,
-          antibiotics: input.results.length,
-          reported_by: input.reported_by,
-          authored_by: authoredBy(req.user!),
+          culture_status: stored.data.culture_status,
+          organism: stored.organism_isolated,
+          organisms: stored.data.organisms.length,
+          antibiotics: stored.flatResults.length,
+          reported_by: reportedBy,
+          auto_verified: noGrowth,
+          requisition_status: requisitionStatus,
+          authored_by: authoredBy(user),
           changes,
         },
       },
       client,
     );
-    const verificationReset = await resetAfterCorrection(client, req.user!, 'antibiogram_reports', before, requisition, changes);
+
     return {
       id: reportId,
       requisition_id: requisition.id,
       lab_no: requisition.lab_no,
-      status: 'REPORT_ENTERED',
+      status: requisitionStatus,
       reporting_datetime: rows[0].reporting_datetime,
       verification_reset: verificationReset,
+      is_verified: isVerified,
+      requisition_status: requisitionStatus,
     };
   });
 
-  res.json({ success: true, message: savedMessage('Antibiogram', report), data: report });
+  const message = noGrowth
+    ? `No-growth culture saved and cleared for Lab No ${report.lab_no}`
+    : savedMessage('Antibiogram', report);
+  res.json({ success: true, message, data: report });
 }
 
 const unverifiedFrom = (type: ReportType) => `

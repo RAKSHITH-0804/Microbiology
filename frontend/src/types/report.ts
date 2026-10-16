@@ -56,9 +56,29 @@ export interface AntibiogramResult {
   sensitivity_result: SensitivityResult;
 }
 
+export type CultureStatus = 'NO_GROWTH' | 'GROWTH';
+
+export interface AntibiogramOrganismBlock {
+  organism_name: string;
+  results: AntibiogramResult[];
+}
+
+/** Canonical multi-organism payload stored in antibiogram_data. */
+export interface AntibiogramData {
+  culture_status: CultureStatus;
+  culture_text: string | null;
+  organisms: AntibiogramOrganismBlock[];
+}
+
 export interface AntibiogramReport extends ReportBase {
   organism_isolated: string | null;
   grams_stain_remark: string | null;
+  /** Normalised culture payload (prefer this over the legacy flat fields). */
+  antibiogram_data?: AntibiogramData | null;
+  culture_status?: CultureStatus;
+  culture_text?: string | null;
+  organisms?: AntibiogramOrganismBlock[];
+  /** Legacy flat results (first organism) for older readers. */
   results: AntibiogramResult[];
 }
 
@@ -78,11 +98,13 @@ export interface GeneralReportPayload {
 
 export interface AntibiogramReportPayload {
   requisition_id: number;
-  organism_isolated: string;
+  culture_status: CultureStatus;
+  culture_text?: string | null;
   grams_stain_remark: string | null;
-  prepared_by: number;
-  reported_by: number;
-  results: AntibiogramResult[];
+  /** Required for GROWTH; optional for NO_GROWTH (server may auto-fill from the session). */
+  prepared_by: number | null;
+  reported_by: number | null;
+  organisms: AntibiogramOrganismBlock[];
 }
 
 export interface SavedReport {
@@ -93,6 +115,10 @@ export interface SavedReport {
   reporting_datetime: string;
   /** The HOD corrected a verified report, so it awaits verification again. */
   verification_reset: boolean;
+  /** Set when a NO_GROWTH save auto-verifies the report. */
+  is_verified?: boolean;
+  /** Requisition status after save (VERIFIED for auto-cleared NO_GROWTH). */
+  requisition_status?: string;
 }
 
 export interface ReportArchiveParams {

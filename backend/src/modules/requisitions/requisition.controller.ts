@@ -7,6 +7,7 @@ import { writeAuditLog } from '../../utils/audit';
 import { AuthUser } from '../../utils/jwt';
 import { formatPaise, paise, rupeesParam } from '../../utils/money';
 import { assertNotCancelled, isRequisitionLocked, REPORT_LOCKED_MESSAGE } from '../../utils/reportLock';
+import { parseAntibiogramData } from '../reports/antibiogramData';
 import { REPORT_TABLES, resetVerification, VerifiedReport } from '../reports/verification';
 import {
   auditBilling,
@@ -659,11 +660,14 @@ export async function getRequisition(req: Request, res: Response) {
       [id],
     ),
     query<ReportRow>(
-      `SELECT a.id, a.reporting_datetime, a.organism_isolated, a.grams_stain_remark,
+      `SELECT a.id, a.reporting_datetime, a.organism_isolated, a.grams_stain_remark, a.antibiogram_data,
               a.prepared_by, a.reported_by, a.is_verified, a.updated_at,
               COALESCE(
-                json_agg(json_build_object('antibiotic_name', x.antibiotic_name, 'sensitivity_result', x.sensitivity_result)
-                         ORDER BY x.id) FILTER (WHERE x.id IS NOT NULL),
+                json_agg(json_build_object(
+                  'organism_name', x.organism_name,
+                  'antibiotic_name', x.antibiotic_name,
+                  'sensitivity_result', x.sensitivity_result
+                ) ORDER BY x.id) FILTER (WHERE x.id IS NOT NULL),
                 '[]'
               ) AS results
        FROM antibiogram_reports a
@@ -675,8 +679,53 @@ export async function getRequisition(req: Request, res: Response) {
   ]);
 
   const generalReport = general.rows[0] ?? null;
-  const antibiogramReport = antibiogram.rows[0] ?? null;
-  assertDoctorCanView(req.user!, [generalReport, antibiogramReport]);
+  const antibiogramRow = antibiogram.rows[0] ?? null;
+  assertDoctorCanView(req.user!, [generalReport, antibiogramRow]);
+
+  let antibiogramReport = antibiogramRow;
+  if (antibiogramRow) {
+    const flat =
+      (antibiogramRow.results as {
+        organism_name?: string;
+        antibiotic_name: string;
+        sensitivity_result: string;
+      }[]) ?? [];
+    const data = parseAntibiogramData(antibiogramRow.antibiogram_data, {
+      organism_isolated: antibiogramRow.organism_isolated as string | null,
+      results: flat.map((r) => ({
+        antibiotic_name: r.antibiotic_name,
+        sensitivity_result: r.sensitivity_result as 'S' | 'R' | 'MS',
+      })),
+    });
+    // Prefer JSONB organisms; when missing, rebuild from per-organism result rows.
+    if (data.culture_status === 'GROWTH' && data.organisms.length === 0 && flat.length) {
+      const byOrg = new Map<string, { antibiotic_name: string; sensitivity_result: 'S' | 'R' | 'MS' }[]>();
+      for (const r of flat) {
+        const key = r.organism_name || (antibiogramRow.organism_isolated as string) || 'Organism';
+        const list = byOrg.get(key) ?? [];
+        list.push({
+          antibiotic_name: r.antibiotic_name,
+          sensitivity_result: r.sensitivity_result as 'S' | 'R' | 'MS',
+        });
+        byOrg.set(key, list);
+      }
+      data.organisms = [...byOrg.entries()].map(([organism_name, results]) => ({ organism_name, results }));
+    }
+    antibiogramReport = {
+      ...antibiogramRow,
+      antibiogram_data: data,
+      culture_status: data.culture_status,
+      culture_text: data.culture_text,
+      organisms: data.organisms,
+      // Flat results kept for older UI that still reads a single grid.
+      results:
+        data.organisms[0]?.results ??
+        flat.map(({ antibiotic_name, sensitivity_result }) => ({
+          antibiotic_name,
+          sensitivity_result,
+        })),
+    };
+  }
 
   res.json({
     success: true,

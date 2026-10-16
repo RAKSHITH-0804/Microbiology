@@ -84,11 +84,72 @@
     padding-top: 2mm;
   }
 
+  /* Compact patient box at the top of page 2+ — keep it with the organism grid below. */
+  .antibiogram-continuation-header {
+    margin: 0 0 2.5mm;
+    break-after: avoid;
+    page-break-after: avoid;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .antibiogram-continuation-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #000;
+    font-size: 9.5pt;
+    line-height: 1.25;
+  }
+
+  .antibiogram-continuation-table td {
+    width: 50%;
+    border: 1px solid #000;
+    padding: 1.5mm 2.5mm;
+    vertical-align: top;
+  }
+
+  .antibiogram-continuation-label {
+    display: block;
+    font-size: 8pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .antibiogram-continuation-value {
+    display: block;
+    margin-top: 0.5mm;
+    font-weight: 600;
+  }
+
   .antibiogram-heading {
     margin: 4mm 0 2mm;
     font-weight: 700;
     text-decoration: underline;
     text-underline-offset: 2px;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .antibiogram-organism-heading {
+    margin: 5mm 0 1mm;
+    font-weight: 700;
+    font-size: 11pt;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .antibiogram-page--continued .antibiogram-organism-heading {
+    margin-top: 2mm;
+  }
+
+  .antibiogram-table thead {
+    display: table-header-group;
+  }
+
+  .antibiogram-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .antibiogram-grid {
