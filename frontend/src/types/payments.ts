@@ -33,7 +33,7 @@ export interface PaymentSummary {
 
 export interface PaymentTransaction {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
   receipt_no: string | null;
   created_at: string;
   sample_received_datetime: string;

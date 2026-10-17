@@ -29,8 +29,9 @@ const ageMax = (unit: AgeUnit) => AGE_UNIT_OPTIONS.find((o) => o.unit === unit)!
 
 const requisitionFormFields = z
   .object({
-    lab_no: text(50).min(1, 'Lab No. is required'),
-    receipt_no: text(50),
+    /** Optional at registration; filled when the sample arrives in the lab. */
+    lab_no: text(50),
+    receipt_no: text(50).min(1, 'Receipt No is required'),
     sample_received_datetime: z.string().min(1, 'Receiving date & time is required'),
 
     patient_name: text(150).min(2, 'Patient name is required'),
@@ -132,8 +133,8 @@ export function toCreatePayload(v: RequisitionFormValues): CreateRequisitionPayl
     address: orNull(v.address),
     ...computePayment(v),
     billing_reason: orNull(v.billing_reason),
-    lab_no: v.lab_no.trim(),
-    receipt_no: orNull(v.receipt_no),
+    lab_no: orNull(v.lab_no ?? ''),
+    receipt_no: v.receipt_no.trim(),
     hospital: v.hospital as Hospital,
     hospital_other: v.hospital === 'Other' ? orNull(v.hospital_other) : null,
     consultant_doctor: orNull(withDoctorPrefix(v.consultant_doctor.trim())),
@@ -172,7 +173,7 @@ export function fromRequisition(r: PendingRequisition): RequisitionFormValues {
   const localDateTime = (iso: string | null) => (iso ? toDateTimeLocal(new Date(iso)) : '');
 
   return {
-    lab_no: r.lab_no,
+    lab_no: r.lab_no ?? '',
     receipt_no: r.receipt_no ?? '',
     sample_received_datetime: localDateTime(r.sample_received_datetime),
     patient_name: p.name,

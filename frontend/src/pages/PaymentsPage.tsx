@@ -33,6 +33,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
+import { LabNoCell, labNoLabel } from '@/components/requisitions/LabNoCell';
 import { PaymentActionButton } from '@/components/requisitions/PaymentActionButton';
 import { UpdatePaymentDialog } from '@/components/requisitions/UpdatePaymentDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -330,7 +331,7 @@ function PatientHistory({
                     <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border bg-white px-4 py-3">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-slate-900">
-                          Visit {i + 1}: <span className="font-mono">{v.lab_no}</span>{' '}
+                          Visit {i + 1}: <span className="font-mono">{labNoLabel(v.lab_no, v.receipt_no)}</span>{' '}
                           <span className="font-normal text-slate-600">
                             ({formatPaise(v.paid_amount_paise)} {PAYMENT_STATUS_META[v.payment_status].label})
                           </span>
@@ -747,7 +748,7 @@ export default function PaymentsPage() {
                     {history?.items.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-50/70">
                         <td className="whitespace-nowrap px-4 py-3 font-mono font-semibold text-slate-900">
-                          {t.lab_no}
+                          <LabNoCell labNo={t.lab_no} receiptNo={t.receipt_no} />
                           {t.cancelled_at && <CancelledBadge className="ml-2 font-sans" />}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDateTime(t.created_at)}</td>

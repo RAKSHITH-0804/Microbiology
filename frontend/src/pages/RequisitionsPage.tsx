@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { StatusPill } from '@/components/reports/StatusPill';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
 import { PaymentActionButton } from '@/components/requisitions/PaymentActionButton';
+import { LabNoCell, labNoLabel } from '@/components/requisitions/LabNoCell';
 import { PatientDetails, SampleBadge } from '@/components/requisitions/PatientCells';
 import { ReportStaff } from '@/components/requisitions/ReportStaff';
 import { UpdatePaymentDialog } from '@/components/requisitions/UpdatePaymentDialog';
@@ -111,7 +112,7 @@ function ViewReportsMenu({ r }: { r: PendingRequisition }) {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-1.5">
         <p className="px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Reports for {r.lab_no}
+          Reports for {labNoLabel(r.lab_no, r.receipt_no)}
         </p>
         <ReportLink
           to={`/reports/general/${r.id}`}
@@ -329,8 +330,7 @@ export default function RequisitionsPage() {
                   return (
                     <tr key={r.id} className="align-top hover:bg-slate-50/70">
                       <td className="whitespace-nowrap px-3 py-3">
-                        <p className="font-mono font-semibold text-slate-900">{r.lab_no}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">Receipt {r.receipt_no || '-'}</p>
+                        <LabNoCell labNo={r.lab_no} receiptNo={r.receipt_no} />
                       </td>
                       <td className="min-w-[10rem] px-3 py-3">
                         <PatientDetails patient={r.patient} />
@@ -435,7 +435,10 @@ export default function RequisitionsPage() {
         description={
           cancelTarget && (
             <>
-              <span className="font-mono font-semibold text-foreground">{cancelTarget.lab_no}</span> - {cancelTarget.patient.name}
+              <span className="font-mono font-semibold text-foreground">
+                {labNoLabel(cancelTarget.lab_no, cancelTarget.receipt_no)}
+              </span>{' '}
+              - {cancelTarget.patient.name}
             </>
           )
         }

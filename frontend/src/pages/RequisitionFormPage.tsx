@@ -112,7 +112,8 @@ function emptyForm(): RequisitionFormValues {
 }
 
 interface SavedInfo {
-  labNo: string;
+  labNo: string | null;
+  receiptNo: string;
   patientName: string;
   testCount: number;
   paymentStatus: PaymentStatus;
@@ -158,6 +159,7 @@ export default function RequisitionFormPage() {
     mode: 'onTouched',
   });
 
+  const focusReceiptNo = () => setTimeout(() => document.getElementById('receipt_no')?.focus(), 0);
   const focusLabNo = () => setTimeout(() => document.getElementById('lab_no')?.focus(), 0);
 
   const phoneField = register('phone');
@@ -281,16 +283,22 @@ export default function RequisitionFormPage() {
       const saved = await createRequisition(toCreatePayload(values));
       setLastSaved({
         labNo: saved.lab_no,
+        receiptNo: saved.receipt_no ?? values.receipt_no.trim(),
         patientName: values.patient_name.trim(),
         testCount: values.tests.length,
         paymentStatus: saved.payment_status,
       });
-      toast.success(`Requisition saved - Lab No ${saved.lab_no}`, {
-        description: `${values.patient_name.trim()} - ${values.tests.length} investigation(s)`,
-      });
+      toast.success(
+        saved.lab_no
+          ? `Requisition saved - Lab No ${saved.lab_no}`
+          : `Requisition saved - Receipt ${saved.receipt_no ?? values.receipt_no.trim()}`,
+        {
+          description: `${values.patient_name.trim()} - ${values.tests.length} investigation(s)`,
+        },
+      );
       reset(emptyForm());
       document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
-      focusLabNo();
+      focusReceiptNo();
     } catch (err) {
       const body = (err as AxiosError<{ errors?: Record<string, string[] | string> }>).response?.data;
       if (body?.errors && typeof body.errors === 'object') {
@@ -307,7 +315,8 @@ export default function RequisitionFormPage() {
 
   const handleReset = () => {
     reset(original ? fromRequisition(original) : emptyForm());
-    focusLabNo();
+    if (isEdit) focusLabNo();
+    else focusReceiptNo();
   };
 
   if (isEdit && (editLoading || editError || !original)) {
@@ -349,7 +358,9 @@ export default function RequisitionFormPage() {
             </Link>
           )}
           <h2 className="text-xl font-semibold text-foreground">
-            {isEdit ? `Edit Requisition - ${original?.lab_no}` : 'Investigations Requisition Form'}
+            {isEdit
+              ? `Edit Requisition - ${original?.lab_no || (original?.receipt_no ? `Receipt ${original.receipt_no}` : 'Pending Lab No')}`
+              : 'Investigations Requisition Form'}
           </h2>
           <p className="text-sm text-muted-foreground">Department of Microbiology, J.J.M. Medical College, Davangere</p>
         </div>
@@ -378,7 +389,18 @@ export default function RequisitionFormPage() {
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
           <div className="flex-1 text-sm">
             <p className="font-semibold">
-              Saved with Lab No <span className="rounded bg-emerald-600 px-1.5 py-0.5 font-mono text-white">{lastSaved.labNo}</span>
+              {lastSaved.labNo ? (
+                <>
+                  Saved with Lab No{' '}
+                  <span className="rounded bg-emerald-600 px-1.5 py-0.5 font-mono text-white">{lastSaved.labNo}</span>
+                </>
+              ) : (
+                <>
+                  Saved with Receipt{' '}
+                  <span className="rounded bg-emerald-600 px-1.5 py-0.5 font-mono text-white">{lastSaved.receiptNo}</span>
+                  <span className="ml-1 font-normal text-emerald-700">(Lab No pending)</span>
+                </>
+              )}
             </p>
             <p className="mt-0.5 text-emerald-700">
               {lastSaved.patientName} - {lastSaved.testCount} investigation(s). The form is ready for the next sample.
@@ -403,12 +425,24 @@ export default function RequisitionFormPage() {
           <CardTitle>Registration</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
-          <FormField label="Lab No." htmlFor="lab_no" required error={errors.lab_no?.message}>
-            <Input id="lab_no" autoFocus autoComplete="off" placeholder="e.g. LAB-2026-001" aria-invalid={!!errors.lab_no} {...register('lab_no')} />
+          <FormField
+            label="Lab No."
+            htmlFor="lab_no"
+            error={errors.lab_no?.message}
+          >
+            <Input
+              id="lab_no"
+              autoFocus={isEdit}
+              autoComplete="off"
+              placeholder="e.g. LAB-2026-001"
+              aria-invalid={!!errors.lab_no}
+              {...register('lab_no')}
+            />
           </FormField>
           <FormField
             label="Receipt No."
             htmlFor="receipt_no"
+            required
             error={errors.receipt_no?.message}
             hint={isEdit ? 'Locked to the receipt issued at registration' : undefined}
           >
@@ -425,7 +459,13 @@ export default function RequisitionFormPage() {
                 <Lock className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               </div>
             ) : (
-              <Input id="receipt_no" autoComplete="off" aria-invalid={!!errors.receipt_no} {...register('receipt_no')} />
+              <Input
+                id="receipt_no"
+                autoFocus
+                autoComplete="off"
+                aria-invalid={!!errors.receipt_no}
+                {...register('receipt_no')}
+              />
             )}
           </FormField>
           <FormField

@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { labNoLabel } from '@/components/requisitions/LabNoCell';
 import { searchRequisitionStatus } from '@/features/requisitions/api';
 import { getErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
@@ -146,7 +147,9 @@ export default function StatusTimelinePage() {
                     )}
                   >
                     <span className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-sm font-semibold text-slate-900">{r.lab_no}</span>
+                      <span className="font-mono text-sm font-semibold text-slate-900">
+                        {labNoLabel(r.lab_no, r.receipt_no)}
+                      </span>
                       <StatusPill status={r.status} />
                     </span>
                     <span className="truncate text-sm font-medium text-slate-700">{r.patient_name}</span>
@@ -172,7 +175,9 @@ export default function StatusTimelinePage() {
               <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 space-y-0 border-b pb-4">
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2">
-                    <span className="font-mono">{timeline?.lab_no ?? '...'}</span>
+                    <span className="font-mono">
+                      {timeline ? labNoLabel(timeline.lab_no, timeline.receipt_no) : '...'}
+                    </span>
                     {timeline && <StatusPill status={timeline.status} />}
                   </CardTitle>
                   <CardDescription>{timeline ? timeline.patient_name : 'Loading sample...'}</CardDescription>

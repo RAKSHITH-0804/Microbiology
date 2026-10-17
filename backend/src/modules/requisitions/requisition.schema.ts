@@ -62,8 +62,9 @@ export const requisitionTestSchema = z.object({
 export const createRequisitionSchema = z
   .object({
     patient: patientSchema,
-    lab_no: z.string().trim().min(1, 'Lab No is required').max(50),
-    receipt_no: optionalText(50),
+    /** Optional at registration; assigned when the sample is received in the lab. */
+    lab_no: optionalText(50),
+    receipt_no: z.string().trim().min(1, 'Receipt No is required').max(50),
     address: optionalText(500),
     hospital: z.enum(HOSPITALS, { errorMap: () => ({ message: 'Select a hospital' }) }),
     hospital_other: optionalText(150),

@@ -80,8 +80,10 @@ export function UpdatePaymentDialog({
       const result = await updatePayment(requisition.id, computePayment(v), needsReason ? reason.trim() : undefined);
       if (!result.changed) toast.info('No payment changes to save');
       else if (isReleasedForReporting(result.payment_status) && !isReleasedForReporting(requisition.payment_status)) {
-        toast.success(`Payment recorded - ${result.lab_no} is now on the Pending Worklist`);
-      } else toast.success(`Payment updated for ${result.lab_no}`);
+        toast.success(
+          `Payment recorded - ${result.lab_no ?? requisition.lab_no ?? 'sample'} is now on the Pending Worklist`,
+        );
+      } else toast.success(`Payment updated for ${result.lab_no ?? requisition.lab_no ?? 'sample'}`);
       onSaved(result);
       onClose();
     } catch (err) {
@@ -109,7 +111,10 @@ export function UpdatePaymentDialog({
                 )}
               </DialogTitle>
               <DialogDescription>
-                <span className="font-mono font-semibold text-foreground">{requisition.lab_no}</span> - {requisition.patient_name}
+                <span className="font-mono font-semibold text-foreground">
+                  {requisition.lab_no || 'Pending Lab No'}
+                </span>{' '}
+                - {requisition.patient_name}
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="space-y-4">

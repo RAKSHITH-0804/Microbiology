@@ -46,7 +46,7 @@ export interface CancellationInfo {
 /** What the Update Payment dialog needs, from either the directory or the revenue ledger. */
 export interface PaymentTarget {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
   patient_name: string;
   total_amount_paise: number;
   paid_amount_paise: number;
@@ -59,7 +59,7 @@ export interface PaymentTarget {
 
 export interface UpdatedPayment extends PaymentPayload {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
   changed: boolean;
 }
 
@@ -97,8 +97,8 @@ export interface CreateRequisitionPayload extends PaymentPayload {
     sex: Sex;
     phone: string | null;
   };
-  lab_no: string;
-  receipt_no: string | null;
+  lab_no: string | null;
+  receipt_no: string;
   hospital: Hospital;
   hospital_other: string | null;
   consultant_doctor: string | null;
@@ -116,7 +116,8 @@ export interface CreateRequisitionPayload extends PaymentPayload {
 
 export interface CreatedRequisition {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
+  receipt_no?: string | null;
   status: RequisitionStatus;
   payment_status: PaymentStatus;
   sample_received_datetime: string;
@@ -126,7 +127,8 @@ export interface CreatedRequisition {
 
 export interface UpdatedRequisition {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
+  receipt_no?: string | null;
   status: RequisitionStatus;
   payment_status: PaymentStatus;
   patient_id: number;
@@ -140,7 +142,7 @@ export interface RequisitionTest extends RequisitionTestInput {
 
 export interface PendingRequisition extends CancellationInfo {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
   receipt_no: string | null;
   status: RequisitionStatus;
   hospital: string | null;
@@ -186,7 +188,7 @@ export interface PendingRequisition extends CancellationInfo {
 /** One match on the Status Timeline search. */
 export interface StatusSearchResult {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
   receipt_no: string | null;
   patient_name: string;
   sample_nature: string | null;
@@ -248,7 +250,8 @@ export interface TimelineReport {
 
 export interface RequisitionTimeline extends CancellationInfo {
   id: number;
-  lab_no: string;
+  lab_no: string | null;
+  receipt_no?: string | null;
   status: RequisitionStatus;
   patient_name: string;
   received_at: string;

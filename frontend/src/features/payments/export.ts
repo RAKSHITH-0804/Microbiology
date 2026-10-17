@@ -57,8 +57,8 @@ export const referredBy = (r: PaymentTransaction) =>
 const statusLabel = (r: PaymentTransaction) =>
   r.cancelled_at ? `${PAYMENT_STATUS_META[r.payment_status].label} (Cancelled)` : PAYMENT_STATUS_META[r.payment_status].label;
 
-/** Receipt number when issued; otherwise the lab number. */
-const receiptNo = (r: PaymentTransaction) => r.receipt_no?.trim() || r.lab_no;
+/** Receipt number when issued; otherwise the lab number (or placeholder). */
+const receiptNo = (r: PaymentTransaction) => r.receipt_no?.trim() || r.lab_no || 'Pending Lab No';
 
 /**
  * Amount for the PDF ledger: billed total for hospital credit / exempt, otherwise the amount paid.
@@ -68,7 +68,7 @@ const ledgerAmountPaise = (r: PaymentTransaction) =>
 
 /** Text cells, and amounts as integer paise (converted per format when written). */
 const rowCells = (r: PaymentTransaction): (string | number)[] => [
-  r.lab_no,
+  r.lab_no || receiptNo(r),
   format(new Date(r.created_at), 'dd-MM-yyyy HH:mm'),
   r.patient_name,
   r.phone ?? '',

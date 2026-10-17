@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { StatusPill } from '@/components/reports/StatusPill';
+import { LabNoCell } from '@/components/requisitions/LabNoCell';
 import { PatientDetails, SampleBadge } from '@/components/requisitions/PatientCells';
 import { ReportStaff } from '@/components/requisitions/ReportStaff';
 import { useAuth } from '@/context/AuthContext';
@@ -130,8 +131,7 @@ export default function PendingQueuePage() {
               {visible.map((r) => (
                 <tr key={r.id} className="align-top hover:bg-slate-50/70">
                   <td className="px-3 py-3">
-                    <p className="break-words font-mono font-semibold text-slate-900">{r.lab_no}</p>
-                    <p className="mt-0.5 break-words text-xs text-slate-500">Receipt {r.receipt_no || '-'}</p>
+                    <LabNoCell labNo={r.lab_no} receiptNo={r.receipt_no} />
                   </td>
                   <td className="px-3 py-3">
                     <PatientDetails patient={r.patient} />

@@ -179,7 +179,7 @@ export default function GeneralReportPage() {
       <ReportPageFrame
         step="Step 2A - General Culture Report"
         title="General Report"
-        labNo={requisition?.lab_no}
+        labNo={requisition?.lab_no ?? undefined}
         loading={loading}
         error={error}
         onRetry={reload}
@@ -321,7 +321,7 @@ export default function GeneralReportPage() {
         open={revokeOpen}
         reportType="general"
         reportId={requisition?.general_report?.id}
-        labNo={requisition?.lab_no}
+        labNo={requisition?.lab_no ?? undefined}
         onClose={() => setRevokeOpen(false)}
         onRevoked={reload}
       />

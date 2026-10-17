@@ -537,7 +537,7 @@ export default function AntibiogramReportPage() {
       <ReportPageFrame
         step="Step 2B - Antibiogram Report"
         title="Culture & Sensitivity"
-        labNo={requisition?.lab_no}
+        labNo={requisition?.lab_no ?? undefined}
         loading={loading}
         error={error}
         onRetry={reload}
@@ -740,7 +740,7 @@ export default function AntibiogramReportPage() {
         open={revokeOpen}
         reportType="antibiogram"
         reportId={requisition?.antibiogram_report?.id}
-        labNo={requisition?.lab_no}
+        labNo={requisition?.lab_no ?? undefined}
         onClose={() => setRevokeOpen(false)}
         onRevoked={reload}
       />
@@ -789,7 +789,7 @@ export default function AntibiogramReportPage() {
               continuationPatient={{
                 patientName: requisition.patient.name,
                 ageSex: `${formatAge(requisition.patient)} / ${formatSex(requisition.patient.sex)}`,
-                labNo: requisition.lab_no,
+                labNo: requisition.lab_no ?? '-',
                 receiptNo: requisition.receipt_no ?? '-',
                 sample: requisition.sample_nature ?? '-',
                 date: formatDateTime(requisition.sample_received_datetime),
