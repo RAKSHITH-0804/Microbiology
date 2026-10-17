@@ -39,36 +39,48 @@ function firstName(staffName) {
   return withoutTitle.split(/[\s.]+/).find(Boolean).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function accountFor(member) {
-  if (/\bHOD\b/i.test(member.designation)) {
-    return { username: DEFAULT_HOD_USERNAME, role: 'HOD' };
+/** Teaching HODs get both an HOD login (no staff link) and a doctor login linked to the staff row. */
+function accountsFor(member) {
+  const isHod = /\bHOD\b/i.test(member.designation);
+  const isTeaching = member.staff_type === 'TEACHING';
+  if (isHod && isTeaching) {
+    return [
+      { username: DEFAULT_HOD_USERNAME, role: 'HOD', linkStaff: false },
+      { username: `dr.${firstName(member.name)}`, role: 'DOCTOR', linkStaff: true },
+    ];
   }
-  if (member.staff_type === 'TEACHING') {
-    return { username: `dr.${firstName(member.name)}`, role: 'DOCTOR' };
+  if (isHod) {
+    return [{ username: DEFAULT_HOD_USERNAME, role: 'HOD', linkStaff: true }];
   }
-  return { username: firstName(member.name), role: 'LAB_TECH' };
+  if (isTeaching) {
+    return [{ username: `dr.${firstName(member.name)}`, role: 'DOCTOR', linkStaff: true }];
+  }
+  return [{ username: firstName(member.name), role: 'LAB_TECH', linkStaff: true }];
 }
 
-/** One login per active staff member that has no account yet; existing accounts are never touched. */
+/** Ensure every active staff member has their expected login(s); existing usernames are never updated. */
 async function seedStaffUsers(client) {
-  const { rows: unlinked } = await client.query(
+  const { rows: members } = await client.query(
     `SELECT s.id, s.name, s.designation, s.staff_type
      FROM master_staff s
-     WHERE s.is_active AND NOT EXISTS (SELECT 1 FROM users u WHERE u.staff_id = s.id)
+     WHERE s.is_active
      ORDER BY s.id`,
   );
 
   const created = [];
   const skipped = [];
   const hash = await bcrypt.hash(DEFAULT_STAFF_PASSWORD, BCRYPT_ROUNDS);
-  for (const member of unlinked) {
-    const account = accountFor(member);
-    const res = await client.query(
-      `INSERT INTO users (username, password_hash, role, staff_id, must_change_password) VALUES ($1, $2, $3, $4, TRUE)
-       ON CONFLICT ((LOWER(username))) DO NOTHING`,
-      [account.username, hash, account.role, member.id],
-    );
-    (res.rowCount ? created : skipped).push({ ...account, staff: member.name });
+  for (const member of members) {
+    for (const account of accountsFor(member)) {
+      const staffId = account.linkStaff ? member.id : null;
+      const res = await client.query(
+        `INSERT INTO users (username, password_hash, role, staff_id, must_change_password) VALUES ($1, $2, $3, $4, TRUE)
+         ON CONFLICT ((LOWER(username))) DO NOTHING`,
+        [account.username, hash, account.role, staffId],
+      );
+      const entry = { username: account.username, role: account.role, staff: member.name };
+      (res.rowCount ? created : skipped).push(entry);
+    }
   }
   return { created, skipped };
 }
