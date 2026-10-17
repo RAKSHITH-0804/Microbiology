@@ -137,11 +137,13 @@ export default function RequisitionFormPage() {
   const { user } = useAuth();
   // Doctors don't handle billing; the server ignores any payment fields they send.
   const showBilling = user?.role !== 'DOCTOR';
+  // Set once while empty + Exempt; afterwards frozen (server ignores changes).
+  const referralFrozen = !!original?.exempt_referred_by?.trim();
   // The exemption authority is hidden from staff without billing access; saving keeps the stored one.
-  const referralOnRecord = !canSeeBilling(user) && original?.payment_mode === 'EXEMPT';
+  const referralOnRecord = !canSeeBilling(user) && (referralFrozen || original?.payment_mode === 'EXEMPT');
   const formSchema = useMemo(
-    () => buildRequisitionFormSchema(showBilling, referralOnRecord),
-    [showBilling, referralOnRecord],
+    () => buildRequisitionFormSchema(showBilling, referralOnRecord || referralFrozen),
+    [showBilling, referralOnRecord, referralFrozen],
   );
 
   const {
@@ -851,20 +853,37 @@ export default function RequisitionFormPage() {
               </div>
             </FormField>
           </div>
-          {exempt && referralOnRecord && (
+          {referralFrozen && canSeeBilling(user) && (
+            <FormField
+              label={EXEMPT_REFERRAL_LABEL}
+              hint="Locked after the first Exempt save; kept if the mode later changes"
+            >
+              <div className="relative">
+                <Input
+                  id="exempt_referred_by"
+                  readOnly
+                  tabIndex={-1}
+                  className="cursor-not-allowed bg-slate-50 pr-9 text-slate-700"
+                  {...register('exempt_referred_by')}
+                />
+                <Lock className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              </div>
+            </FormField>
+          )}
+          {referralFrozen && referralOnRecord && !canSeeBilling(user) && (
             <FormField label={EXEMPT_REFERRAL_LABEL}>
               <p className="flex h-9 items-center rounded-md border border-dashed bg-muted/40 px-3 text-sm text-muted-foreground">
                 On record - visible to billing staff only
               </p>
             </FormField>
           )}
-          {exempt && !referralOnRecord && (
+          {exempt && !referralFrozen && !referralOnRecord && (
             <FormField
               label={EXEMPT_REFERRAL_LABEL}
               htmlFor="exempt_referred_by"
               required
               error={errors.exempt_referred_by?.message}
-              hint="Recorded on the bill and in the audit trail"
+              hint="Required for Exempt; cannot be changed after save"
             >
               <Input
                 id="exempt_referred_by"

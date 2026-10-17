@@ -16,6 +16,7 @@ import {
   lowersPaidBill,
   OVERRIDE_REASON_MIN,
   RELEASED_PAYMENT_STATUSES,
+  resolveExemptReferral,
   UpdatePaymentInput,
 } from './payment';
 import {
@@ -78,95 +79,118 @@ async function assertTestsInCatalog(client: PoolClient, tests: CreateRequisition
 /** Only the Super Admin may back-date or correct the receiving time; everyone else gets the server clock. */
 const canSetReceivedTime = (user: AuthUser) => user.role === 'SUPER_ADMIN';
 
+const RECEIPT_EXISTS = { receipt_no: ['Receipt No already exists'] as string[] };
+
+async function assertReceiptAvailable(client: PoolClient, receiptNo: string) {
+  const dup = await client.query(
+    `SELECT 1 FROM requisitions WHERE LOWER(TRIM(receipt_no)) = LOWER(TRIM($1)) LIMIT 1`,
+    [receiptNo],
+  );
+  if (dup.rowCount) {
+    throw new AppError(409, `Receipt No "${receiptNo.trim()}" is already registered`, RECEIPT_EXISTS);
+  }
+}
+
 export async function createRequisition(req: Request, res: Response) {
   const input = req.body as CreateRequisitionInput;
   const userId = req.user!.sub;
   const hospital = input.hospital === 'Other' ? input.hospital_other : input.hospital;
   const billing = billingFor(input);
   const receivedAt = canSetReceivedTime(req.user!) ? input.sample_received_datetime : new Date();
+  const receiptNo = input.receipt_no.trim();
 
-  const result = await withTransaction(async (client) => {
-    await assertTestsInCatalog(client, input.requisition_tests);
-    const patient = await upsertPatient(client, input.patient);
+  try {
+    const result = await withTransaction(async (client) => {
+      await assertReceiptAvailable(client, receiptNo);
+      await assertTestsInCatalog(client, input.requisition_tests);
+      const patient = await upsertPatient(client, input.patient);
 
-    const { rows } = await client.query<{
-      id: number;
-      lab_no: string | null;
-      receipt_no: string | null;
-      status: string;
-      payment_status: string;
-      sample_received_datetime: Date;
-    }>(
-      `INSERT INTO requisitions (
-         lab_no, receipt_no, patient_id, hospital, consultant_doctor, op_ip_no, ward_unit,
-         clinical_diagnosis, preferred_antibiotics, antibiotics_used, sample_nature, site_of_collection,
-         sample_collection_datetime, sample_received_datetime, status, created_by,
-         address, total_amount, paid_amount, payment_status, payment_mode, exempt_referred_by
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15,$16,
-                 ${rupeesParam('$17')},${rupeesParam('$18')},$19,$20,$21)
-       RETURNING id, lab_no, receipt_no, status, payment_status, sample_received_datetime`,
-      [
-        input.lab_no,
-        input.receipt_no,
-        patient.id,
-        hospital,
-        input.consultant_doctor,
-        input.op_ip_no,
-        input.ward_unit,
-        input.clinical_diagnosis,
-        input.preferred_antibiotics,
-        input.antibiotics_used,
-        input.sample_nature,
-        input.site_of_collection,
-        input.sample_collection_datetime,
-        receivedAt,
-        userId,
-        input.address,
-        billing.total_amount_paise,
-        billing.paid_amount_paise,
-        billing.payment_status,
-        billing.payment_mode,
-        billing.exempt_referred_by,
-      ],
-    );
-    const requisition = rows[0];
+      const { rows } = await client.query<{
+        id: number;
+        lab_no: string | null;
+        receipt_no: string | null;
+        status: string;
+        payment_status: string;
+        sample_received_datetime: Date;
+      }>(
+        `INSERT INTO requisitions (
+           lab_no, receipt_no, patient_id, hospital, consultant_doctor, op_ip_no, ward_unit,
+           clinical_diagnosis, preferred_antibiotics, antibiotics_used, sample_nature, site_of_collection,
+           sample_collection_datetime, sample_received_datetime, status, created_by,
+           address, total_amount, paid_amount, payment_status, payment_mode, exempt_referred_by
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'RECEIVED',$15,$16,
+                   ${rupeesParam('$17')},${rupeesParam('$18')},$19,$20,$21)
+         RETURNING id, lab_no, receipt_no, status, payment_status, sample_received_datetime`,
+        [
+          input.lab_no,
+          receiptNo,
+          patient.id,
+          hospital,
+          input.consultant_doctor,
+          input.op_ip_no,
+          input.ward_unit,
+          input.clinical_diagnosis,
+          input.preferred_antibiotics,
+          input.antibiotics_used,
+          input.sample_nature,
+          input.site_of_collection,
+          input.sample_collection_datetime,
+          receivedAt,
+          userId,
+          input.address,
+          billing.total_amount_paise,
+          billing.paid_amount_paise,
+          billing.payment_status,
+          billing.payment_mode,
+          billing.exempt_referred_by,
+        ],
+      );
+      const requisition = rows[0];
 
-    await client.query(
-      `INSERT INTO requisition_tests (requisition_id, test_category, test_name)
-       SELECT $1, * FROM UNNEST($2::text[], $3::text[])`,
-      [
-        requisition.id,
-        input.requisition_tests.map((t) => t.test_category),
-        input.requisition_tests.map((t) => t.test_name),
-      ],
-    );
+      await client.query(
+        `INSERT INTO requisition_tests (requisition_id, test_category, test_name)
+         SELECT $1, * FROM UNNEST($2::text[], $3::text[])`,
+        [
+          requisition.id,
+          input.requisition_tests.map((t) => t.test_category),
+          input.requisition_tests.map((t) => t.test_name),
+        ],
+      );
 
-    await writeAuditLog(
-      {
-        userId,
-        action: 'CREATE',
-        entityName: 'requisitions',
-        entityId: requisition.id,
-        details: {
-          lab_no: requisition.lab_no,
-          patient_id: patient.id,
-          patient_created: patient.created,
-          tests: input.requisition_tests.length,
-          total_amount: formatPaise(billing.total_amount_paise),
-          paid_amount: formatPaise(billing.paid_amount_paise),
-          payment_status: billing.payment_status,
-          payment_mode: billing.payment_mode,
-          ...(billing.exempt_referred_by && { exempt_referred_by: billing.exempt_referred_by }),
+      await writeAuditLog(
+        {
+          userId,
+          action: 'CREATE',
+          entityName: 'requisitions',
+          entityId: requisition.id,
+          details: {
+            lab_no: requisition.lab_no,
+            receipt_no: requisition.receipt_no,
+            patient_id: patient.id,
+            patient_created: patient.created,
+            tests: input.requisition_tests.length,
+            total_amount: formatPaise(billing.total_amount_paise),
+            paid_amount: formatPaise(billing.paid_amount_paise),
+            payment_status: billing.payment_status,
+            payment_mode: billing.payment_mode,
+            ...(billing.exempt_referred_by && { exempt_referred_by: billing.exempt_referred_by }),
+          },
         },
-      },
-      client,
-    );
+        client,
+      );
 
-    return { ...requisition, patient_id: patient.id, patient_created: patient.created };
-  });
+      return { ...requisition, patient_id: patient.id, patient_created: patient.created };
+    });
 
-  const label = result.lab_no ?? result.receipt_no ?? `#${result.id}`;
-  res.status(201).json({ success: true, message: `Requisition ${label} saved`, data: result });
+    const label = result.lab_no ?? result.receipt_no ?? `#${result.id}`;
+    res.status(201).json({ success: true, message: `Requisition ${label} saved`, data: result });
+  } catch (err) {
+    const constraint = (err as { constraint?: string }).constraint;
+    if (constraint === 'uq_requisitions_receipt_no_normalized') {
+      throw new AppError(409, `Receipt No "${receiptNo}" is already registered`, RECEIPT_EXISTS);
+    }
+    throw err;
+  }
 }
 
 const EDITABLE_COLUMNS = [
@@ -291,10 +315,13 @@ export async function updateRequisition(req: Request, res: Response) {
     // Only the HOD may correct a verified requisition; changes printed on the report reset its verification.
     const locked = await isRequisitionLocked(client, id, before.status);
     if (locked && req.user!.role !== 'HOD') throw new AppError(400, REPORT_LOCKED_MESSAGE);
-    // Staff without billing access never see the exemption authority, so an exempt bill keeps the stored one.
-    const keepReferral =
-      !hasRevenueAccess(req.user!) && input.payment_mode === 'EXEMPT' && !input.exempt_referred_by;
-    const billing = billingFor(keepReferral ? { ...input, exempt_referred_by: before.exempt_referred_by } : input);
+    // Referral is set-once: reuse the stored name for validation when already on file (or hidden from non-billing staff).
+    const storedReferral = (before.exempt_referred_by as string | null) ?? null;
+    const billing = billingFor({
+      ...input,
+      exempt_referred_by: storedReferral ?? input.exempt_referred_by,
+    });
+    const exemptReferredBy = resolveExemptReferral(storedReferral, billing.payment_mode, billing.exempt_referred_by);
 
     await assertTestsInCatalog(client, input.requisition_tests);
     const patientBefore = (
@@ -327,7 +354,7 @@ export async function updateRequisition(req: Request, res: Response) {
       paid_amount: billing.paid_amount_paise,
       payment_status: billing.payment_status,
       payment_mode: billing.payment_mode,
-      exempt_referred_by: billing.exempt_referred_by,
+      exempt_referred_by: exemptReferredBy,
     };
 
     const billingChanged = BILLING_COLUMNS.some((c) => comparable(before[c]) !== comparable(after[c]));
@@ -509,7 +536,6 @@ export async function listPendingRequisitions(req: Request, res: Response) {
 export async function updatePayment(req: Request, res: Response) {
   const id = Number(req.params.id);
   const input = req.body as UpdatePaymentInput;
-  const after = billingFor(input);
 
   const result = await withTransaction(async (client) => {
     const existing = await client.query<
@@ -529,6 +555,19 @@ export async function updatePayment(req: Request, res: Response) {
     if (override && req.user!.role !== 'HOD') {
       throw new AppError(403, 'Only the HOD can modify payment details after report verification');
     }
+
+    const parsed = billingFor({
+      ...input,
+      exempt_referred_by: before.exempt_referred_by ?? input.exempt_referred_by,
+    });
+    const after: Billing = {
+      ...parsed,
+      exempt_referred_by: resolveExemptReferral(
+        before.exempt_referred_by,
+        parsed.payment_mode,
+        parsed.exempt_referred_by,
+      ),
+    };
 
     const auditBefore = auditBilling(before);
     const auditAfter = auditBilling(after);

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
-import { AlertTriangle, Info, Loader2, Save, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Info, Loader2, Lock, Save, ShieldAlert } from 'lucide-react';
 import { AmountInput } from '@/components/AmountInput';
 import { FormField } from '@/components/FormField';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
@@ -68,6 +68,7 @@ export function UpdatePaymentDialog({
     exempt_referred_by: watch('exempt_referred_by'),
   });
   const exempt = payment.payment_mode === 'EXEMPT';
+  const referralFrozen = !!requisition?.exempt_referred_by?.trim();
   const noCounterPayment = isNoCounterPayment(payment.payment_mode);
   const balanceDue = Math.max(payment.total_amount_paise - payment.paid_amount_paise, 0);
   const reducingPaidBill = !!requisition && lowersPaidBill(requisition, payment);
@@ -158,12 +159,30 @@ export function UpdatePaymentDialog({
                   </Button>
                 </div>
               </div>
-              {exempt && (
+              {referralFrozen && (
+                <FormField
+                  label={EXEMPT_REFERRAL_LABEL}
+                  hint="Locked after the first Exempt save; kept if the mode later changes"
+                >
+                  <div className="relative">
+                    <Input
+                      id="pay_exempt_referred_by"
+                      readOnly
+                      tabIndex={-1}
+                      className="cursor-not-allowed bg-slate-50 pr-9 text-slate-700"
+                      {...register('exempt_referred_by')}
+                    />
+                    <Lock className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </FormField>
+              )}
+              {exempt && !referralFrozen && (
                 <FormField
                   label={EXEMPT_REFERRAL_LABEL}
                   htmlFor="pay_exempt_referred_by"
                   required
                   error={errors.exempt_referred_by?.message}
+                  hint="Required for Exempt; cannot be changed after save"
                 >
                   <Input
                     id="pay_exempt_referred_by"

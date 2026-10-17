@@ -45,7 +45,8 @@ async function ensureSuperAdmin(client) {
     await client.query(
       `UPDATE users SET password_hash = $2, role = CASE WHEN LOWER(username) = $3 THEN 'SUPER_ADMIN' ELSE role END,
                         must_change_password = FALSE, password_changed_at = NOW(),
-                        password_reset_requested = FALSE, password_reset_requested_at = NULL
+                        password_reset_requested = FALSE, password_reset_requested_at = NULL,
+                        session_version = session_version + 1
        WHERE id = $1`,
       [user.id, hash, SUPERADMIN_USERNAME],
     );

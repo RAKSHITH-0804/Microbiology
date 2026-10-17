@@ -54,20 +54,20 @@ async function authenticate(req: Request, _res: Response, next: NextFunction, en
       role: UserRole;
       staff_id: number | null;
       is_active: boolean;
-      password_changed_at: Date | null;
+      session_version: number;
       must_change_password: boolean;
       enabled_modules: string[];
       disabled_modules: string[];
       idle_seconds: number | null;
     }>(
-      `SELECT role, staff_id, is_active, password_changed_at, must_change_password, ${MODULE_OVERRIDES_SQL('users.id')},
+      `SELECT role, staff_id, is_active, session_version, must_change_password, ${MODULE_OVERRIDES_SQL('users.id')},
               EXTRACT(EPOCH FROM NOW() - last_seen_at)::float8 AS idle_seconds
        FROM users WHERE id = $1`,
       [payload.sub],
     );
     const user = rows[0];
     if (!user?.is_active) return next(new AppError(401, 'Your account is disabled. Contact the administrator.'));
-    if (user.password_changed_at && (payload.iat ?? 0) < Math.floor(user.password_changed_at.getTime() / 1000)) {
+    if (payload.sv !== user.session_version) {
       return next(new AppError(401, 'Your password was changed. Please log in again.'));
     }
     if (user.idle_seconds !== null && user.idle_seconds > SESSION_IDLE_LIMIT_SECONDS) {

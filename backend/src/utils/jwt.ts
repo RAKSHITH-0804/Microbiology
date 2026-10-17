@@ -9,6 +9,8 @@ export interface JwtPayload {
   sub: number;
   username: string;
   role: UserRole;
+  /** Session version; must match users.session_version or the token is rejected. */
+  sv: number;
   /** Issued-at (seconds), added by jsonwebtoken when signing. */
   iat?: number;
 }

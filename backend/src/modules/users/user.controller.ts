@@ -212,7 +212,8 @@ export async function resetUserPassword(req: Request, res: Response) {
 
     await client.query(
       `UPDATE users SET password_hash = $2, must_change_password = TRUE, password_changed_at = NOW(),
-                        password_reset_requested = FALSE, password_reset_requested_at = NULL
+                        password_reset_requested = FALSE, password_reset_requested_at = NULL,
+                        session_version = session_version + 1
        WHERE id = $1`,
       [id, hash],
     );

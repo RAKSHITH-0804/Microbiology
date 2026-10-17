@@ -1,5 +1,16 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { api, bearer, createRequisition, createUser, enterGeneralReport, grantModules, pool, TestRequisition, TestUser } from './helpers';
+import {
+  api,
+  bearer,
+  createRequisition,
+  createUser,
+  enterGeneralReport,
+  grantModules,
+  pool,
+  requisitionBody,
+  TestRequisition,
+  TestUser,
+} from './helpers';
 
 const REFERRAL = 'Dr. Ramaswamy, Medical Superintendent CGH';
 
@@ -100,6 +111,74 @@ describe('exemption authority (Referred By)', () => {
         .put(`/api/requisitions/${r.id}`)
         .set(bearer(noBilling))
         .send({ ...r.body, exempt_referred_by: null, ward_unit: 'Ward 3' });
+      expect(edit.status).toBe(200);
+      const { rows } = await pool.query('SELECT exempt_referred_by FROM requisitions WHERE id = $1', [r.id]);
+      expect(rows[0].exempt_referred_by).toBe(REFERRAL);
+    });
+  });
+
+  describe('set-once freeze', () => {
+    it('refuses Exempt without a referral name', async () => {
+      const res = await api()
+        .post('/api/requisitions')
+        .set(bearer(tech))
+        .send(requisitionBody({ ...exemptBill, exempt_referred_by: null }));
+      expect(res.status).toBe(400);
+      expect(res.body.errors?.exempt_referred_by?.[0]).toMatch(/referred|authorised|authorized/i);
+    });
+
+    it('Cash to Exempt with a referral works once; a later change is ignored', async () => {
+      const r = await createRequisition(tech);
+      const toExempt = await api()
+        .patch(`/api/requisitions/${r.id}/payment`)
+        .set(bearer(tech))
+        .send({
+          total_amount_paise: 0,
+          paid_amount_paise: 0,
+          payment_mode: 'EXEMPT',
+          exempt_referred_by: REFERRAL,
+          reason: 'Converted to fee exemption authorised by Medical Superintendent',
+        });
+      expect(toExempt.status).toBe(200);
+      expect(toExempt.body.data.exempt_referred_by).toBe(REFERRAL);
+
+      const attempt = await api()
+        .patch(`/api/requisitions/${r.id}/payment`)
+        .set(bearer(tech))
+        .send({
+          total_amount_paise: 0,
+          paid_amount_paise: 0,
+          payment_mode: 'EXEMPT',
+          exempt_referred_by: 'Someone Else Entirely',
+        });
+      expect(attempt.status).toBe(200);
+      const { rows } = await pool.query('SELECT exempt_referred_by, payment_mode FROM requisitions WHERE id = $1', [
+        r.id,
+      ]);
+      expect(rows[0].exempt_referred_by).toBe(REFERRAL);
+
+      const toCash = await api()
+        .patch(`/api/requisitions/${r.id}/payment`)
+        .set(bearer(tech))
+        .send({
+          total_amount_paise: 15050,
+          paid_amount_paise: 15050,
+          payment_mode: 'CASH',
+          exempt_referred_by: 'Should Stay Frozen',
+          reason: 'Returning to cash after temporary exemption for audit',
+        });
+      expect(toCash.status).toBe(200);
+      const after = await pool.query('SELECT exempt_referred_by, payment_mode FROM requisitions WHERE id = $1', [r.id]);
+      expect(after.rows[0].payment_mode).toBe('CASH');
+      expect(after.rows[0].exempt_referred_by).toBe(REFERRAL);
+    });
+
+    it('PUT that tries to change a frozen referral is ignored', async () => {
+      const r = await createRequisition(tech, exemptBill);
+      const edit = await api()
+        .put(`/api/requisitions/${r.id}`)
+        .set(bearer(tech))
+        .send({ ...r.body, exempt_referred_by: 'Changed On Put' });
       expect(edit.status).toBe(200);
       const { rows } = await pool.query('SELECT exempt_referred_by FROM requisitions WHERE id = $1', [r.id]);
       expect(rows[0].exempt_referred_by).toBe(REFERRAL);

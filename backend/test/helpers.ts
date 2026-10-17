@@ -41,13 +41,19 @@ export async function createUser(role: UserRole, opts: CreateUserOptions = {}): 
     staffId = staff.rows[0].id;
   }
   const hash = opts.password ? await bcrypt.hash(opts.password, 4) : 'not-a-real-hash';
-  const { rows } = await pool.query<{ id: number }>(
+  const { rows } = await pool.query<{ id: number; session_version: number }>(
     `INSERT INTO users (username, password_hash, role, staff_id, must_change_password, is_active)
-     VALUES ($1, $2, $3, $4, FALSE, $5) RETURNING id`,
+     VALUES ($1, $2, $3, $4, FALSE, $5) RETURNING id, session_version`,
     [username, hash, role, staffId, opts.isActive ?? true],
   );
   const id = rows[0].id;
-  return { id, username, role, staffId, token: signToken({ sub: id, username, role }) };
+  return {
+    id,
+    username,
+    role,
+    staffId,
+    token: signToken({ sub: id, username, role, sv: rows[0].session_version }),
+  };
 }
 
 export const bearer = (user: TestUser) => ({ Authorization: `Bearer ${user.token}` });
@@ -73,11 +79,12 @@ export const CATALOG_TEST = { test_category: 'Bacteriology - Culture', test_name
 const labRun = Math.random().toString(36).slice(2, 8);
 let labSeq = 0;
 
-/** A valid New Requisition body (fully paid, Rs 150.50) with a unique Lab No. */
+/** A valid New Requisition body (fully paid, Rs 150.50) with unique Lab No and Receipt No. */
 export function requisitionBody(overrides: Record<string, unknown> = {}) {
   labSeq += 1;
   return {
     lab_no: `T-${labRun}-${labSeq}`,
+    receipt_no: `R-${labRun}-${labSeq}`,
     hospital: 'CGH',
     sample_nature: 'Urine',
     patient: { name: 'Test Patient', age_years: 30, sex: 'M', phone: '9876543210' },

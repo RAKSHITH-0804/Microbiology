@@ -119,6 +119,20 @@ export function billingFor(body: Partial<Record<keyof Billing, unknown>>): Billi
   };
 }
 
+/**
+ * Exemption authority may be written once (while empty and mode is EXEMPT); afterwards it is frozen
+ * even if the payment mode later changes away from EXEMPT.
+ */
+export function resolveExemptReferral(
+  stored: string | null | undefined,
+  mode: PaymentMode | null,
+  incoming: string | null,
+): string | null {
+  if (stored) return stored;
+  if (mode === 'EXEMPT') return incoming;
+  return null;
+}
+
 /** Lowering the amount billed or paid on a fully paid bill (a refund or correction) needs a written reason. */
 export const lowersPaidBill = (
   before: { payment_status: string; total_amount_paise: number; paid_amount_paise: number },

@@ -21,13 +21,14 @@ interface UserRow {
   staff_name: string | null;
   designation: string | null;
   must_change_password: boolean;
+  session_version: number;
   enabled_modules: string[];
   disabled_modules: string[];
 }
 
 const USER_SELECT = `
   SELECT u.id, u.username, u.password_hash, u.role, u.is_active, u.staff_id, u.must_change_password,
-         s.name AS staff_name, s.designation, ${MODULE_OVERRIDES_SQL('u.id')}
+         u.session_version, s.name AS staff_name, s.designation, ${MODULE_OVERRIDES_SQL('u.id')}
   FROM users u
   LEFT JOIN master_staff s ON s.id = u.staff_id`;
 
@@ -78,7 +79,12 @@ export async function login(req: Request, res: Response) {
   }
 
   await query('UPDATE users SET last_seen_at = NOW() WHERE id = $1', [user.id]);
-  const token = signToken({ sub: user.id, username: user.username, role: user.role });
+  const token = signToken({
+    sub: user.id,
+    username: user.username,
+    role: user.role,
+    sv: user.session_version,
+  });
   res.cookie(AUTH_COOKIE, token, authCookieOptions);
 
   await writeAuditLog({
@@ -204,11 +210,13 @@ export async function changePassword(req: Request, res: Response) {
 
   const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
   const changedAt = new Date();
-  await withTransaction(async (client) => {
-    await client.query(
+  const { rows: bumped } = await withTransaction(async (client) => {
+    const updated = await client.query<{ session_version: number }>(
       `UPDATE users SET password_hash = $2, password_changed_at = $3, must_change_password = FALSE,
-                        password_reset_requested = FALSE, password_reset_requested_at = NULL
-       WHERE id = $1`,
+                        password_reset_requested = FALSE, password_reset_requested_at = NULL,
+                        session_version = session_version + 1
+       WHERE id = $1
+       RETURNING session_version`,
       [userId, hash, changedAt],
     );
     await resolveNotifications(client, 'PASSWORD_RESET', 'users', userId);
@@ -222,10 +230,15 @@ export async function changePassword(req: Request, res: Response) {
       },
       client,
     );
+    return updated;
   });
 
   // Every other session is now invalid; keep this one signed in with a fresh token.
   const { sub, username, role } = req.user!;
-  res.cookie(AUTH_COOKIE, signToken({ sub, username, role }), authCookieOptions);
+  res.cookie(
+    AUTH_COOKIE,
+    signToken({ sub, username, role, sv: bumped[0].session_version }),
+    authCookieOptions,
+  );
   res.json({ success: true, message: 'Password changed successfully' });
 }

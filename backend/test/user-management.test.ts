@@ -48,11 +48,9 @@ describe('HOD and Super Admin accounts are reserved to the Super Admin', () => {
   });
 
   it("a user granted Users can reset a staff member's password", async () => {
-    // Token times are whole seconds; a token signed in the same second as the reset still counts as newer.
-    await new Promise((resolve) => setTimeout(resolve, 1100));
     const res = await api().post(`/api/users/${clerk.id}/reset-password`).set(bearer(delegate)).send({ password: 'Temp-Pass-123' });
     expect(res.status).toBe(200);
-    // The reset signs the clerk out everywhere.
+    // The reset signs the clerk out everywhere (session_version bump).
     const after = await api().get('/api/notifications').set(bearer(clerk));
     expect(after.status).toBe(401);
   });
