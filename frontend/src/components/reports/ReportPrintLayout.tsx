@@ -40,7 +40,7 @@ export function ReportPrintLayout({
   const { settings, printPrefs } = useSettings();
 
   return (
-    <div className="report-print-container print-report relative hidden font-serif text-[8.5pt] leading-snug text-black print:flex">
+    <div className="report-print-container print-report relative hidden text-[8.5pt] text-black print:flex">
       {draft ? (
         // position: fixed repeats the watermark on every printed page.
         <div aria-hidden className="pointer-events-none fixed inset-0 z-0 flex items-center justify-center">

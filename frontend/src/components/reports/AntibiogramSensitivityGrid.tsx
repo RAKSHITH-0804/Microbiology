@@ -37,9 +37,9 @@ interface Density {
   lineHeight: number;
 }
 
-const RELAXED: Density = { className: 'antibiogram-table-relaxed', paddingY: 3, paddingX: 6, fontSize: 11.33, lineHeight: 1.2 };
-const MEDIUM: Density = { className: 'antibiogram-table-medium', paddingY: 2, paddingX: 4, fontSize: 11.33, lineHeight: 1.2 };
-const COMPACT: Density = { className: 'antibiogram-table-compact', paddingY: 2, paddingX: 4, fontSize: 10.67, lineHeight: 1.2 };
+const RELAXED: Density = { className: 'antibiogram-table-relaxed', paddingY: 3, paddingX: 6, fontSize: 12, lineHeight: 1.3 };
+const MEDIUM: Density = { className: 'antibiogram-table-medium', paddingY: 2, paddingX: 4, fontSize: 11.33, lineHeight: 1.3 };
+const COMPACT: Density = { className: 'antibiogram-table-compact', paddingY: 2, paddingX: 4, fontSize: 11.33, lineHeight: 1.3 };
 
 /** Reports up to this size print as one full-width table. */
 const RELAXED_MAX = 6;
@@ -47,7 +47,8 @@ const MEDIUM_MAX = 20;
 
 const densityFor = (total: number) => (total <= RELAXED_MAX ? RELAXED : total <= MEDIUM_MAX ? MEDIUM : COMPACT);
 
-const fontOf = (d: Density) => `${d.fontSize}px "Times New Roman", Times, serif`;
+const PRINT_FONT = 'Arial, "Helvetica Neue", Helvetica, "Segoe UI", sans-serif';
+const fontOf = (d: Density) => `${d.fontSize}px ${PRINT_FONT}`;
 
 /** On a continuation page of a two-column report, this few leftover items print as one full-width table. */
 const SINGLE_TABLE_MAX = 4;
@@ -157,7 +158,7 @@ function firstPageTop({ draft, remark }: PrintChrome): number {
   let top = FIRST_PAGE_TOP + (draft ? DRAFT_BANNER : 0);
   const text = remark?.trim();
   if (text) {
-    const lines = text.split('\n').reduce((n, p) => n + lineCount(p, REMARK_WIDTH, '11.33px "Times New Roman", serif'), 0);
+    const lines = text.split('\n').reduce((n, p) => n + lineCount(p, REMARK_WIDTH, `11.33px ${PRINT_FONT}`), 0);
     top += REMARK_FIRST_LINE + (lines - 1) * REMARK_EXTRA_LINE;
   }
   return top;

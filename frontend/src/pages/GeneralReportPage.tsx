@@ -17,12 +17,18 @@ import { RevokeVerificationDialog } from '@/components/reports/RevokeVerificatio
 import { SignatoryFields } from '@/components/reports/SignatoryFields';
 import { CancelledNotice } from '@/components/requisitions/CancelledNotice';
 import { fetchFindingTemplates, saveGeneralReport } from '@/features/reports/api';
+import {
+  findingsContainPhrase,
+  parseAndGroupFindings,
+  serializeFindingSections,
+  toggleFindingPhrase,
+} from '@/features/reports/generalFindings';
 import { inheritedInvestigation, inheritedSpecimen } from '@/features/reports/inheritedFields';
 import { useReportAccess } from '@/features/reports/useReportAccess';
 import { useReportData } from '@/features/reports/useReportData';
 import { getErrorMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import type { RequisitionDetail } from '@/types/report';
+import type { FindingTemplateGroup, RequisitionDetail } from '@/types/report';
 
 const text = (max: number) => z.string().trim().max(max, `Must be at most ${max} characters`);
 
@@ -36,9 +42,6 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const EMPTY: FormValues = { specimen: '', investigation_done: '', report_findings: '', prepared_by: '', reported_by: '' };
-
-/** Case, spacing and a trailing full stop don't make a phrase different. */
-const normalizePhrase = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/\.$/, '').toLowerCase();
 
 function defaultsFor(r: RequisitionDetail): FormValues {
   const report = r.general_report;
@@ -90,36 +93,43 @@ export default function GeneralReportPage() {
     () => [...new Set(requisition?.tests.map((t) => t.template_test_name).filter((n): n is string => !!n) ?? [])],
     [requisition],
   );
+  /** Prefer requisition tests, then any template categories, so legacy flat lines can still be grouped. */
+  const investigationList = useMemo(() => {
+    const fromTemplates = templates.map((g: FindingTemplateGroup) => g.test_name);
+    return [...new Set([...relevantNames, ...fromTemplates])];
+  }, [relevantNames, templates]);
+
   const shownGroups = templates.filter((g) => relevantNames.includes(g.test_name) || g.test_name === extraTemplate);
   const otherGroups = templates.filter((g) => !relevantNames.includes(g.test_name));
 
-  const findingLines = values.report_findings.split('\n').map(normalizePhrase);
-  const togglePhrase = (phrase: string) => {
-    const target = normalizePhrase(phrase);
+  const togglePhrase = (testName: string, phrase: string) => {
     const current = getValues('report_findings');
-    const lines = current.split('\n');
-    let next: string;
-    if (lines.some((l) => normalizePhrase(l) === target)) {
-      next = lines.filter((l) => normalizePhrase(l) !== target).join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    } else if (normalizePhrase(current).includes(target)) {
-      toast.info('That phrase is already in the report findings');
-      return;
-    } else {
-      next = current.trimEnd() ? `${current.trimEnd()}\n${phrase}` : phrase;
-    }
+    const next = toggleFindingPhrase(current, testName, phrase, {
+      investigationList,
+      templates,
+    });
     setValue('report_findings', next, { shouldDirty: true, shouldValidate: true });
   };
+
+  const findingSections = useMemo(
+    () => parseAndGroupFindings(values.report_findings, investigationList, templates),
+    [values.report_findings, investigationList, templates],
+  );
 
   const save = async (v: FormValues): Promise<boolean> => {
     if (!requisition) return false;
     const specimen = inheritedSpecimen(requisition).slice(0, 150) || null;
     const investigation_done = inheritedInvestigation(requisition).slice(0, 255) || null;
+    // Persist structured headings so future loads keep test-wise grouping.
+    const grouped = parseAndGroupFindings(v.report_findings.trim(), investigationList, templates);
+    const report_findings =
+      serializeFindingSections(grouped).trim() || v.report_findings.trim();
     try {
       const saved = await saveGeneralReport({
         requisition_id: requisition.id,
         specimen,
         investigation_done,
-        report_findings: v.report_findings.trim(),
+        report_findings,
         prepared_by: Number(v.prepared_by),
         reported_by: Number(v.reported_by),
       });
@@ -133,14 +143,14 @@ export default function GeneralReportPage() {
           reporting_datetime: saved.reporting_datetime,
           specimen,
           investigation_done,
-          report_findings: v.report_findings.trim(),
+          report_findings,
           prepared_by: Number(v.prepared_by),
           reported_by: Number(v.reported_by),
           is_verified: false,
           updated_at: new Date().toISOString(),
         },
       }));
-      reset({ ...v, specimen: specimen ?? '', investigation_done: investigation_done ?? '' });
+      reset({ ...v, specimen: specimen ?? '', investigation_done: investigation_done ?? '', report_findings });
       if (saved.verification_reset) {
         toast.success(`General report corrected - Lab No ${saved.lab_no}`, {
           description: 'Verification was reset and the reporting doctor has been notified to verify it again.',
@@ -220,7 +230,10 @@ export default function GeneralReportPage() {
                 <ListPlus className="h-4 w-4 text-primary" />
                 <div className="flex-1">
                   <CardTitle>Findings</CardTitle>
-                  <CardDescription className="mt-1">Click a preset phrase to add it (click again to remove), then edit the text freely.</CardDescription>
+                  <CardDescription className="mt-1">
+                    Click a preset to add it under that test heading (click again to remove). Empty headings are cleared
+                    automatically.
+                  </CardDescription>
                 </div>
               </CardHeader>
               <CardContent className="grid gap-5 lg:grid-cols-2">
@@ -248,15 +261,20 @@ export default function GeneralReportPage() {
                         <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{group.test_name}</p>
                         <div className="space-y-1.5">
                           {group.findings.map((f) => {
-                            const used = findingLines.includes(normalizePhrase(f.finding_text));
+                            const used = findingsContainPhrase(
+                              values.report_findings,
+                              group.test_name,
+                              f.finding_text,
+                              investigationList,
+                            );
                             return (
                               <button
                                 key={f.id}
                                 type="button"
                                 disabled={readOnly}
                                 aria-pressed={used}
-                                title={used ? 'Click to remove from findings' : 'Click to add to findings'}
-                                onClick={() => togglePhrase(f.finding_text)}
+                                title={used ? 'Click to remove from findings' : 'Click to add under this test'}
+                                onClick={() => togglePhrase(group.test_name, f.finding_text)}
                                 className={cn(
                                   'flex w-full items-start gap-2 rounded-md border bg-white px-2.5 py-1.5 text-left text-sm transition hover:border-blue-400 hover:bg-blue-50 disabled:pointer-events-none disabled:opacity-60',
                                   used && 'border-emerald-300 bg-emerald-50',
@@ -278,7 +296,7 @@ export default function GeneralReportPage() {
                     id="report_findings"
                     rows={18}
                     disabled={readOnly}
-                    placeholder="Selected phrases appear here. Type or edit as needed."
+                    placeholder={'AEROBIC CULTURE:\n- No growth after 48 hours\n\nDARK GROUND MICROSCOPY…:\n- …'}
                     aria-invalid={!!errors.report_findings}
                     className="min-h-[26rem] font-mono text-[13px] leading-relaxed"
                     {...register('report_findings')}
@@ -333,7 +351,22 @@ export default function GeneralReportPage() {
             </tbody>
           </table>
           <p className="print-report-section-title">Report</p>
-          <div className="print-report-findings">{values.report_findings}</div>
+          {findingSections.length > 0 ? (
+            <div className="print-findings-groups">
+              {findingSections.map((section) => (
+                <div key={section.heading} className="print-findings-group">
+                  <p className="print-findings-heading">{section.heading}:</p>
+                  <ul className="print-findings-list">
+                    {section.findings.map((finding) => (
+                      <li key={`${section.heading}-${finding}`}>{finding}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="print-report-findings">{values.report_findings}</div>
+          )}
         </ReportPrintLayout>
       )}
     </>

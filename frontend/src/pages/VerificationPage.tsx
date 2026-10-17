@@ -8,13 +8,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
+import { GroupedFindingsView } from '@/components/reports/GroupedFindingsView';
 import { fetchUnverifiedReports, verifyReport } from '@/features/admin/api';
-import { fetchRequisition } from '@/features/reports/api';
+import { fetchFindingTemplates, fetchRequisition } from '@/features/reports/api';
 import { getErrorMessage } from '@/lib/api';
 import { formatAge, formatDateTime, formatSex } from '@/lib/format';
 import type { UnverifiedReport } from '@/types/admin';
 import type { User } from '@/types/auth';
-import { SENSITIVITY_OPTIONS, type RequisitionDetail } from '@/types/report';
+import { SENSITIVITY_OPTIONS, type FindingTemplateGroup, type RequisitionDetail } from '@/types/report';
 
 const TYPE_LABEL = { general: 'General', antibiogram: 'Antibiogram' } as const;
 
@@ -37,6 +38,7 @@ function ReviewDialog({
   onVerified: (report: UnverifiedReport) => void;
 }) {
   const [detail, setDetail] = useState<RequisitionDetail | null>(null);
+  const [templates, setTemplates] = useState<FindingTemplateGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -47,13 +49,23 @@ function ReviewDialog({
     setError(null);
     setDetail(null);
     try {
-      setDetail(await fetchRequisition(report.requisition_id));
+      const [req, findingTemplates] = await Promise.all([
+        fetchRequisition(report.requisition_id),
+        fetchFindingTemplates().catch(() => [] as FindingTemplateGroup[]),
+      ]);
+      setDetail(req);
+      setTemplates(findingTemplates);
     } catch (err) {
       setError(getErrorMessage(err, 'Could not load the report'));
     } finally {
       setLoading(false);
     }
   }, [report]);
+
+  const investigationList = useMemo(() => {
+    const fromReq = detail?.tests.map((t) => t.template_test_name).filter((n): n is string => !!n) ?? [];
+    return [...new Set([...fromReq, ...templates.map((g) => g.test_name)])];
+  }, [detail, templates]);
 
   useEffect(() => {
     load();
@@ -125,8 +137,12 @@ function ReviewDialog({
                       </dl>
                       <div>
                         <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Report Findings</p>
-                        <div className="whitespace-pre-wrap rounded-lg border bg-white p-4 font-serif text-[15px] leading-relaxed">
-                          {general.report_findings}
+                        <div className="rounded-lg border bg-white p-4">
+                          <GroupedFindingsView
+                            text={general.report_findings ?? ''}
+                            investigationList={investigationList}
+                            templates={templates}
+                          />
                         </div>
                       </div>
                     </section>
