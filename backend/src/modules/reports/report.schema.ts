@@ -154,6 +154,26 @@ export const reasonText = (what: string) =>
 export const revokeVerificationSchema = z.object({ reason: reasonText('revoking verification') });
 export type RevokeVerificationInput = z.infer<typeof revokeVerificationSchema>;
 
+export const reviewMarkSchema = z.object({
+  checked: z.boolean({ required_error: 'checked is required' }),
+});
+export type ReviewMarkInput = z.infer<typeof reviewMarkSchema>;
+
+export const BULK_VERIFY_MAX = 50;
+
+export const bulkVerifySchema = z.object({
+  reports: z
+    .array(
+      z.object({
+        type: z.enum(REPORT_TYPES),
+        id: z.coerce.number().int().positive(),
+      }),
+    )
+    .min(1, 'Select at least one report')
+    .max(BULK_VERIFY_MAX, `At most ${BULK_VERIFY_MAX} reports can be verified at once`),
+});
+export type BulkVerifyInput = z.infer<typeof bulkVerifySchema>;
+
 export const printLogParams = z.object({
   type: verifyReportParams.shape.type,
   requisitionId: z.coerce.number().int().positive('Invalid requisition id'),

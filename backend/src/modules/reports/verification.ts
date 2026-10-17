@@ -2,6 +2,7 @@ import { PoolClient } from 'pg';
 import { writeAuditLog } from '../../utils/audit';
 import { notifyStaff } from '../notifications/notification.service';
 import type { ReportType } from './report.schema';
+import { clearReviewMarksForReport } from './reviewContent';
 
 export type ReportTable = 'general_reports' | 'antibiogram_reports';
 
@@ -84,6 +85,7 @@ export async function resetVerification(client: PoolClient, o: ResetOptions) {
     `UPDATE ${o.table} SET is_verified = FALSE, verified_by = NULL, verified_at = NULL WHERE id = $1`,
     [o.report.id],
   );
+  await clearReviewMarksForReport(client, REPORT_TYPE_OF[o.table], o.report.id);
   await client.query(`UPDATE requisitions SET status = 'REPORT_ENTERED' WHERE id = $1`, [o.requisition.id]);
 
   const previous = await staffNames(client, [o.report.verified_by]);

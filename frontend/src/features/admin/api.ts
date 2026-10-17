@@ -3,6 +3,7 @@ import type {
   AppUser,
   AuditLogFilters,
   AuditLogPage,
+  BulkVerifyResult,
   CreateUserPayload,
   MasterEntityKey,
   MasterRow,
@@ -18,6 +19,33 @@ export async function fetchUnverifiedReports(): Promise<UnverifiedReport[]> {
 
 export async function verifyReport(type: ReportType, id: number): Promise<VerifiedReport> {
   const res = await api.post<ApiResponse<VerifiedReport>>(`/reports/${type}/${id}/verify`);
+  return res.data.data;
+}
+
+export async function setReviewMark(
+  type: ReportType,
+  id: number,
+  checked: boolean,
+): Promise<{ report_type: ReportType; report_id: number; reviewed: boolean }> {
+  const res = await api.put<ApiResponse<{ report_type: ReportType; report_id: number; reviewed: boolean }>>(
+    `/reports/${type}/${id}/review-mark`,
+    { checked },
+  );
+  return res.data.data;
+}
+
+export async function bulkVerifyReports(reports: { type: ReportType; id: number }[]): Promise<BulkVerifyResult> {
+  const res = await api.post<ApiResponse<BulkVerifyResult>>('/reports/bulk-verify', { reports });
+  return res.data.data;
+}
+
+export async function clearReviewMarks(): Promise<{ cleared: number }> {
+  const res = await api.delete<ApiResponse<{ cleared: number }>>('/reports/review-marks');
+  return res.data.data;
+}
+
+export async function selectAllReviewMarks(): Promise<{ marked: number }> {
+  const res = await api.post<ApiResponse<{ marked: number }>>('/reports/review-marks/select-all');
   return res.data.data;
 }
 

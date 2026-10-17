@@ -17,6 +17,23 @@ export interface UnverifiedReport {
   reported_by: number | null;
   reported_by_name: string | null;
   reported_by_designation: string | null;
+  /** Present for the logged-in doctor's review ticks (bulk verify). */
+  reviewed?: boolean;
+  /** Mark exists but content changed since the tick; never treat as reviewed. */
+  review_stale?: boolean;
+}
+
+export type BulkVerifySkipReason =
+  | 'changed'
+  | 'cancelled'
+  | 'not_assigned'
+  | 'already_verified'
+  | 'no_mark'
+  | 'not_found';
+
+export interface BulkVerifyResult {
+  verified: number;
+  skipped: { type: ReportType; id: number; reason: BulkVerifySkipReason }[];
 }
 
 export interface VerifiedReport {

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { PoolClient } from 'pg';
-import { query, withTransaction } from '../../config/db';
+import { pool, query, withTransaction } from '../../config/db';
 import { AppError } from '../../middleware/errorHandler';
 import { writeAuditLog } from '../../utils/audit';
 import { AuthUser } from '../../utils/jwt';
@@ -10,13 +10,17 @@ import { assignedToDoctor } from '../requisitions/requisition.controller';
 import { parseAntibiogramData, toStoredAntibiogram } from './antibiogramData';
 import {
   AntibiogramReportInput,
+  BulkVerifyInput,
+  BULK_VERIFY_MAX,
   GeneralReportInput,
   ListReportsQuery,
   PrintLogParams,
   ReportType,
+  ReviewMarkInput,
   RevokeVerificationInput,
   VerifyReportParams,
 } from './report.schema';
+import { computeReviewContentVersion } from './reviewContent';
 import { ChangeMap, diffFields, REPORT_TABLES, ReportTable, reportLabel, resetVerification, VerifiedReport } from './verification';
 
 /**
@@ -423,7 +427,6 @@ export async function saveAntibiogramReport(req: Request, res: Response) {
       },
       client,
     );
-
     return {
       id: reportId,
       requisition_id: requisition.id,
@@ -457,7 +460,24 @@ export async function listUnverifiedReports(req: Request, res: Response) {
     return;
   }
 
-  const { rows } = await query(
+  const userId = req.user!.sub;
+  const { rows } = await query<{
+    report_type: ReportType;
+    report_id: number;
+    requisition_id: number;
+    reporting_datetime: Date;
+    lab_no: string;
+    receipt_no: string | null;
+    sample_nature: string | null;
+    hospital: string | null;
+    patient: unknown;
+    prepared_by: number | null;
+    prepared_by_name: string | null;
+    reported_by: number | null;
+    reported_by_name: string | null;
+    reported_by_designation: string | null;
+    mark_content_version: string | null;
+  }>(
     `SELECT u.report_type, u.report_id, u.requisition_id, u.reporting_datetime,
             r.lab_no, r.receipt_no, r.sample_nature, r.hospital,
             json_build_object(
@@ -466,17 +486,44 @@ export async function listUnverifiedReports(req: Request, res: Response) {
               'sex', p.sex, 'phone', p.phone
             ) AS patient,
             u.prepared_by, ps.name AS prepared_by_name,
-            u.reported_by, rs.name AS reported_by_name, rs.designation AS reported_by_designation
+            u.reported_by, rs.name AS reported_by_name, rs.designation AS reported_by_designation,
+            m.content_version AS mark_content_version
      FROM (${unverifiedFrom('general')} UNION ALL ${unverifiedFrom('antibiogram')}) u
      JOIN requisitions r ON r.id = u.requisition_id AND r.status = 'REPORT_ENTERED' AND r.cancelled_at IS NULL
      JOIN patients p ON p.id = r.patient_id
      LEFT JOIN master_staff ps ON ps.id = u.prepared_by
      LEFT JOIN master_staff rs ON rs.id = u.reported_by
+     LEFT JOIN report_review_marks m
+       ON m.user_id = $${doctorOnly ? 2 : 1}
+      AND m.report_type = u.report_type
+      AND m.report_id = u.report_id
      ${doctorOnly ? 'WHERE u.reported_by = $1' : ''}
      ORDER BY u.reporting_datetime ASC, u.report_id ASC`,
-    doctorOnly ? [staffId] : [],
+    doctorOnly ? [staffId, userId] : [userId],
   );
-  res.json({ success: true, data: rows });
+
+  // Validate ticks against current content versions; leave stale mark rows in place (cleaned on verify/reset/revoke).
+  const client = await pool.connect();
+  try {
+    const data = [];
+    for (const row of rows) {
+      const { mark_content_version, ...rest } = row;
+      let reviewed = false;
+      let review_stale = false;
+      if (mark_content_version) {
+        const current = await computeReviewContentVersion(client, row.report_type, row.report_id);
+        if (current && current === mark_content_version) {
+          reviewed = true;
+        } else {
+          review_stale = true;
+        }
+      }
+      data.push({ ...rest, reviewed, review_stale });
+    }
+    res.json({ success: true, data });
+  } finally {
+    client.release();
+  }
 }
 
 const archiveFrom = (type: ReportType) => `
@@ -698,4 +745,235 @@ export async function logReportPrint(req: Request, res: Response) {
     },
   });
   res.status(201).json({ success: true, data: { draft: !report.is_verified } });
+}
+
+/** Doctor-only: remove every review tick belonging to the logged-in doctor. */
+export async function clearReviewMarks(req: Request, res: Response) {
+  const { sub: userId, role } = req.user!;
+  if (role !== 'DOCTOR') throw new AppError(403, 'Only doctors can clear review marks');
+
+  const result = await query(`DELETE FROM report_review_marks WHERE user_id = $1`, [userId]);
+  res.json({ success: true, data: { cleared: result.rowCount ?? 0 } });
+}
+
+/**
+ * Doctor-only: tick up to BULK_VERIFY_MAX assigned, unverified, non-cancelled reports.
+ * Does not verify or lock any report.
+ */
+export async function selectAllReviewMarks(req: Request, res: Response) {
+  const { sub: userId, role, staff_id: staffId } = req.user!;
+  if (role !== 'DOCTOR') throw new AppError(403, 'Only doctors can mark reports for bulk verification');
+  if (!staffId) throw new AppError(400, 'Your account is not linked to a staff member');
+
+  const marked = await withTransaction(async (client) => {
+    const { rows } = await client.query<{ report_type: ReportType; report_id: number }>(
+      `SELECT u.report_type, u.report_id
+       FROM (${unverifiedFrom('general')} UNION ALL ${unverifiedFrom('antibiogram')}) u
+       JOIN requisitions r ON r.id = u.requisition_id AND r.status = 'REPORT_ENTERED' AND r.cancelled_at IS NULL
+       WHERE u.reported_by = $1
+       ORDER BY u.reporting_datetime ASC, u.report_id ASC
+       LIMIT $2`,
+      [staffId, BULK_VERIFY_MAX],
+    );
+
+    let n = 0;
+    for (const row of rows) {
+      const table = REPORT_TABLES[row.report_type];
+      const locked = await client.query<{ id: number; is_verified: boolean; cancelled_at: Date | null }>(
+        `SELECT x.id, x.is_verified, r.cancelled_at
+         FROM ${table} x JOIN requisitions r ON r.id = x.requisition_id
+         WHERE x.id = $1 AND x.reported_by = $2
+         FOR UPDATE OF x, r`,
+        [row.report_id, staffId],
+      );
+      const report = locked.rows[0];
+      if (!report || report.is_verified || report.cancelled_at) continue;
+
+      const contentVersion = await computeReviewContentVersion(client, row.report_type, row.report_id);
+      if (!contentVersion) continue;
+
+      await client.query(
+        `INSERT INTO report_review_marks (user_id, report_type, report_id, content_version, checked_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (user_id, report_type, report_id) DO UPDATE
+           SET content_version = EXCLUDED.content_version, checked_at = NOW()`,
+        [userId, row.report_type, row.report_id, contentVersion],
+      );
+      n += 1;
+    }
+    return n;
+  });
+
+  res.json({ success: true, data: { marked } });
+}
+
+/** Doctor-only: persist or clear a "Reviewed - correct" tick for bulk verification. */
+export async function setReviewMark(req: Request, res: Response) {
+  const { type, id } = req.params as unknown as VerifyReportParams;
+  const { checked } = req.body as ReviewMarkInput;
+  const { sub: userId, role, staff_id: staffId } = req.user!;
+  if (role !== 'DOCTOR') throw new AppError(403, 'Only doctors can mark reports for bulk verification');
+  if (!staffId) throw new AppError(400, 'Your account is not linked to a staff member');
+
+  const table = REPORT_TABLES[type];
+  const result = await withTransaction(async (client) => {
+    const { rows } = await client.query<{
+      reported_by: number | null;
+      is_verified: boolean;
+      lab_no: string;
+      cancelled_at: Date | null;
+    }>(
+      `SELECT x.reported_by, x.is_verified, r.lab_no, r.cancelled_at
+       FROM ${table} x JOIN requisitions r ON r.id = x.requisition_id
+       WHERE x.id = $1
+       FOR UPDATE OF x, r`,
+      [id],
+    );
+    const report = rows[0];
+    if (!report) throw new AppError(404, 'Report not found');
+    assertNotCancelled(report);
+    if (report.reported_by !== staffId) throw new AppError(403, 'You can only review reports assigned to you');
+    if (report.is_verified) throw new AppError(409, 'This report has already been verified');
+
+    if (!checked) {
+      await client.query(
+        `DELETE FROM report_review_marks WHERE user_id = $1 AND report_type = $2 AND report_id = $3`,
+        [userId, type, id],
+      );
+      return { report_type: type, report_id: id, reviewed: false };
+    }
+
+    const contentVersion = await computeReviewContentVersion(client, type, id);
+    if (!contentVersion) throw new AppError(404, 'Report not found');
+    await client.query(
+      `INSERT INTO report_review_marks (user_id, report_type, report_id, content_version, checked_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id, report_type, report_id) DO UPDATE
+         SET content_version = EXCLUDED.content_version, checked_at = NOW()`,
+      [userId, type, id, contentVersion],
+    );
+    return { report_type: type, report_id: id, reviewed: true };
+  });
+
+  res.json({ success: true, data: result });
+}
+
+type BulkSkipReason = 'changed' | 'cancelled' | 'not_assigned' | 'already_verified' | 'no_mark' | 'not_found';
+
+/**
+ * Doctor-only: verify each ticked report in its own transaction. After locking the report row,
+ * the mark and content version are rechecked so concurrent edits cannot verify stale content.
+ */
+export async function bulkVerifyReports(req: Request, res: Response) {
+  const { reports } = req.body as BulkVerifyInput;
+  const { sub: userId, role, staff_id: staffId } = req.user!;
+  if (role !== 'DOCTOR') throw new AppError(403, 'Only doctors can bulk-verify reports');
+  if (!staffId) throw new AppError(400, 'Your account is not linked to a staff member');
+  if (reports.length > BULK_VERIFY_MAX) {
+    throw new AppError(400, `At most ${BULK_VERIFY_MAX} reports can be verified at once`);
+  }
+
+  let verified = 0;
+  const skipped: { type: ReportType; id: number; reason: BulkSkipReason }[] = [];
+
+  for (const item of reports) {
+    const table = REPORT_TABLES[item.type];
+    try {
+      const outcome = await withTransaction(async (client) => {
+        const { rows } = await client.query<{
+          requisition_id: number;
+          reported_by: number | null;
+          is_verified: boolean;
+          lab_no: string;
+          status: string;
+          cancelled_at: Date | null;
+        }>(
+          `SELECT x.requisition_id, x.reported_by, x.is_verified, r.lab_no, r.status, r.cancelled_at
+           FROM ${table} x JOIN requisitions r ON r.id = x.requisition_id
+           WHERE x.id = $1
+           FOR UPDATE OF x, r`,
+          [item.id],
+        );
+        const report = rows[0];
+        if (!report) return { kind: 'skip' as const, reason: 'not_found' as BulkSkipReason };
+        if (report.cancelled_at) return { kind: 'skip' as const, reason: 'cancelled' as BulkSkipReason };
+        if (report.reported_by !== staffId) return { kind: 'skip' as const, reason: 'not_assigned' as BulkSkipReason };
+        if (report.is_verified || report.status === 'VERIFIED') {
+          return { kind: 'skip' as const, reason: 'already_verified' as BulkSkipReason };
+        }
+
+        const mark = await client.query<{ content_version: string }>(
+          `SELECT content_version FROM report_review_marks
+           WHERE user_id = $1 AND report_type = $2 AND report_id = $3
+           FOR UPDATE`,
+          [userId, item.type, item.id],
+        );
+        if (!mark.rows[0]) return { kind: 'skip' as const, reason: 'no_mark' as BulkSkipReason };
+
+        const currentVersion = await computeReviewContentVersion(client, item.type, item.id);
+        if (!currentVersion || currentVersion !== mark.rows[0].content_version) {
+          await client.query(
+            `DELETE FROM report_review_marks WHERE user_id = $1 AND report_type = $2 AND report_id = $3`,
+            [userId, item.type, item.id],
+          );
+          return { kind: 'skip' as const, reason: 'changed' as BulkSkipReason };
+        }
+
+        const updated = await client.query<{ verified_at: Date }>(
+          `UPDATE ${table} SET is_verified = TRUE, verified_by = $2, verified_at = NOW()
+           WHERE id = $1 RETURNING verified_at`,
+          [item.id, staffId],
+        );
+        const status = await client.query<{ status: string }>(
+          `UPDATE requisitions r
+           SET status = CASE
+             WHEN EXISTS (SELECT 1 FROM general_reports WHERE requisition_id = r.id AND NOT is_verified)
+               OR EXISTS (SELECT 1 FROM antibiogram_reports WHERE requisition_id = r.id AND NOT is_verified)
+             THEN r.status ELSE 'VERIFIED' END
+           WHERE r.id = $1
+           RETURNING r.status`,
+          [report.requisition_id],
+        );
+        await client.query(
+          `DELETE FROM report_review_marks WHERE user_id = $1 AND report_type = $2 AND report_id = $3`,
+          [userId, item.type, item.id],
+        );
+        await writeAuditLog(
+          {
+            userId,
+            action: 'VERIFY',
+            entityName: table,
+            entityId: item.id,
+            details: {
+              requisition_id: report.requisition_id,
+              lab_no: report.lab_no,
+              verified_by_staff_id: staffId,
+              requisition_status: status.rows[0].status,
+              bulk: true,
+            },
+          },
+          client,
+        );
+        return {
+          kind: 'ok' as const,
+          lab_no: report.lab_no,
+          verified_at: updated.rows[0].verified_at,
+        };
+      });
+
+      if (outcome.kind === 'ok') verified += 1;
+      else skipped.push({ type: item.type, id: item.id, reason: outcome.reason });
+    } catch {
+      skipped.push({ type: item.type, id: item.id, reason: 'changed' });
+    }
+  }
+
+  res.json({
+    success: true,
+    message:
+      skipped.length === 0
+        ? `${verified} report(s) verified and locked`
+        : `${verified} verified, ${skipped.length} skipped`,
+    data: { verified, skipped },
+  });
 }

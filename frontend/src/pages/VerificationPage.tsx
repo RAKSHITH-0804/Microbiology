@@ -1,21 +1,38 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ExternalLink, Inbox, Loader2, Lock, RefreshCw, Search, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, ExternalLink, Inbox, Loader2, Lock, RefreshCw, Search, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { GroupedFindingsView } from '@/components/reports/GroupedFindingsView';
-import { fetchUnverifiedReports, verifyReport } from '@/features/admin/api';
+import {
+  bulkVerifyReports,
+  clearReviewMarks,
+  fetchUnverifiedReports,
+  selectAllReviewMarks,
+  setReviewMark,
+  verifyReport,
+} from '@/features/admin/api';
 import { fetchFindingTemplates, fetchRequisition } from '@/features/reports/api';
 import { getErrorMessage } from '@/lib/api';
 import { formatAge, formatDateTime, formatSex } from '@/lib/format';
-import type { UnverifiedReport } from '@/types/admin';
+import type { BulkVerifySkipReason, UnverifiedReport } from '@/types/admin';
 import type { User } from '@/types/auth';
 import { SENSITIVITY_OPTIONS, type FindingTemplateGroup, type RequisitionDetail } from '@/types/report';
+
+const SKIP_LABEL: Record<BulkVerifySkipReason, string> = {
+  changed: 'they changed',
+  cancelled: 'they were cancelled',
+  not_assigned: 'they are not assigned to you',
+  already_verified: 'they were already verified',
+  no_mark: 'they were not marked reviewed',
+  not_found: 'they were not found',
+};
 
 const TYPE_LABEL = { general: 'General', antibiogram: 'Antibiogram' } as const;
 
@@ -30,18 +47,30 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 
 function ReviewDialog({
   report,
+  queue,
+  doctorReview,
   onClose,
   onVerified,
+  onNavigate,
+  onReviewedChange,
 }: {
   report: UnverifiedReport | null;
+  queue: UnverifiedReport[];
+  doctorReview: boolean;
   onClose: () => void;
   onVerified: (report: UnverifiedReport) => void;
+  onNavigate: (report: UnverifiedReport) => void;
+  onReviewedChange: (report: UnverifiedReport, reviewed: boolean) => void;
 }) {
   const [detail, setDetail] = useState<RequisitionDetail | null>(null);
   const [templates, setTemplates] = useState<FindingTemplateGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [marking, setMarking] = useState(false);
+
+  const queueIndex = report ? queue.findIndex((r) => r.report_type === report.report_type && r.report_id === report.report_id) : -1;
+  const position = queueIndex >= 0 ? queueIndex + 1 : 0;
 
   const load = useCallback(async () => {
     if (!report) return;
@@ -87,11 +116,25 @@ function ReviewDialog({
     }
   };
 
+  const handleReviewed = async (checked: boolean) => {
+    if (!report || !doctorReview) return;
+    setMarking(true);
+    try {
+      await setReviewMark(report.report_type, report.report_id, checked);
+      onReviewedChange(report, checked);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not save the review mark'));
+    } finally {
+      setMarking(false);
+    }
+  };
+
   const general = detail?.general_report;
   const antibiogram = detail?.antibiogram_report;
+  const busy = verifying || marking;
 
   return (
-    <Dialog open={!!report} onOpenChange={(open) => !open && !verifying && onClose()}>
+    <Dialog open={!!report} onOpenChange={(open) => !open && !busy && onClose()}>
       <DialogContent className="max-w-3xl">
         {report && (
           <>
@@ -101,6 +144,11 @@ function ReviewDialog({
               </DialogTitle>
               <DialogDescription>
                 Check the draft carefully. Once verified, the report and its requisition can no longer be edited.
+                {doctorReview && queue.length > 0 && (
+                  <span className="ml-2 font-medium text-foreground">
+                    {position} of {queue.length}
+                  </span>
+                )}
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="space-y-5">
@@ -210,17 +258,48 @@ function ReviewDialog({
                 </>
               )}
             </DialogBody>
-            <DialogFooter>
+            <DialogFooter className="flex-wrap gap-2">
               <Button asChild variant="ghost" className="mr-auto">
                 <Link to={`/reports/${report.report_type}/${report.requisition_id}`}>
                   <ExternalLink /> Open report page
                 </Link>
               </Button>
-              <Button variant="outline" onClick={onClose} disabled={verifying}>Cancel</Button>
+              {doctorReview && (
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy || queueIndex <= 0}
+                    onClick={() => queueIndex > 0 && onNavigate(queue[queueIndex - 1])}
+                  >
+                    <ChevronLeft /> Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy || queueIndex < 0 || queueIndex >= queue.length - 1}
+                    onClick={() => queueIndex >= 0 && queueIndex < queue.length - 1 && onNavigate(queue[queueIndex + 1])}
+                  >
+                    Next <ChevronRight />
+                  </Button>
+                </div>
+              )}
+              {doctorReview && (
+                <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                  <Checkbox
+                    checked={!!report.reviewed}
+                    disabled={busy || !detail}
+                    onCheckedChange={(v) => handleReviewed(v === true)}
+                  />
+                  <span>Reviewed - correct</span>
+                </label>
+              )}
               <Button
                 className="bg-emerald-600 text-white hover:bg-emerald-700"
                 onClick={handleVerify}
-                disabled={verifying || !detail}
+                disabled={busy || !detail}
               >
                 {verifying ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
                 {verifying ? 'Verifying...' : 'Verify & Lock Report'}
@@ -277,11 +356,18 @@ function QueueScopeBanner({ user, count }: { user: User | null; count: number })
 
 export default function VerificationPage() {
   const { user } = useAuth();
+  const doctorReview = user?.role === 'DOCTOR';
   const [rows, setRows] = useState<UnverifiedReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [reviewing, setReviewing] = useState<UnverifiedReport | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [selectOpen, setSelectOpen] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [marksBusy, setMarksBusy] = useState(false);
+  const [rowMarkingKey, setRowMarkingKey] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -310,9 +396,106 @@ export default function VerificationPage() {
     [rows, term],
   );
 
+  const checkedCount = useMemo(() => rows.filter((r) => r.reviewed).length, [rows]);
+  const allChecked = rows.length > 0 && checkedCount === rows.length;
+  const bulkLabel =
+    checkedCount === 0
+      ? 'Verify 0 checked'
+      : allChecked
+        ? `Verify all ${checkedCount}`
+        : `Verify ${checkedCount} checked`;
+
   const handleVerified = (report: UnverifiedReport) => {
     setRows((current) => current.filter((r) => !(r.report_type === report.report_type && r.report_id === report.report_id)));
-    setReviewing(null);
+    setReviewing((current) => {
+      if (!current || (current.report_type === report.report_type && current.report_id === report.report_id)) {
+        return null;
+      }
+      return current;
+    });
+  };
+
+  const handleReviewedChange = (report: UnverifiedReport, reviewed: boolean) => {
+    const patch = { reviewed, review_stale: false };
+    setRows((current) =>
+      current.map((r) =>
+        r.report_type === report.report_type && r.report_id === report.report_id ? { ...r, ...patch } : r,
+      ),
+    );
+    setReviewing((current) =>
+      current && current.report_type === report.report_type && current.report_id === report.report_id
+        ? { ...current, ...patch }
+        : current,
+    );
+  };
+
+  const handleListReviewed = async (report: UnverifiedReport, checked: boolean) => {
+    const key = `${report.report_type}-${report.report_id}`;
+    setRowMarkingKey(key);
+    try {
+      await setReviewMark(report.report_type, report.report_id, checked);
+      handleReviewedChange(report, checked);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not save the review mark'));
+    } finally {
+      setRowMarkingKey(null);
+    }
+  };
+
+  const handleBulkVerify = async () => {
+    const marked = rows.filter((r) => r.reviewed).map((r) => ({ type: r.report_type, id: r.report_id }));
+    if (!marked.length) return;
+    setBulkBusy(true);
+    try {
+      const result = await bulkVerifyReports(marked);
+      const reasonCounts = result.skipped.reduce<Partial<Record<BulkVerifySkipReason, number>>>((acc, s) => {
+        acc[s.reason] = (acc[s.reason] ?? 0) + 1;
+        return acc;
+      }, {});
+      const skipParts = (Object.entries(reasonCounts) as [BulkVerifySkipReason, number][]).map(
+        ([reason, n]) => `${n} ${SKIP_LABEL[reason]}`,
+      );
+      toast.success(
+        result.skipped.length
+          ? `${result.verified} verified, ${result.skipped.length} skipped because ${skipParts.join('; ')}`
+          : `${result.verified} report(s) verified and locked`,
+      );
+      setBulkOpen(false);
+      await load();
+      setReviewing(null);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Bulk verification failed'));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleSelectAll = async () => {
+    setMarksBusy(true);
+    try {
+      const result = await selectAllReviewMarks();
+      toast.success(`${result.marked} report(s) marked as reviewed`);
+      setSelectOpen(false);
+      await load();
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not select all reports'));
+    } finally {
+      setMarksBusy(false);
+    }
+  };
+
+  const handleClearAll = async () => {
+    setMarksBusy(true);
+    try {
+      const result = await clearReviewMarks();
+      toast.success(`Cleared ${result.cleared} review mark${result.cleared === 1 ? '' : 's'}`);
+      setClearOpen(false);
+      await load();
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not clear review marks'));
+    } finally {
+      setMarksBusy(false);
+    }
   };
 
   return (
@@ -322,6 +505,11 @@ export default function VerificationPage() {
           <h2 className="text-xl font-semibold text-foreground">Report Verification</h2>
           <p className="text-sm text-muted-foreground">
             {rows.length} report(s) awaiting {user?.role === 'DOCTOR' ? 'your' : 'doctor'} verification
+            {doctorReview && (
+              <span className="ml-2 font-medium text-foreground">
+                {checkedCount} of {rows.length} checked
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -334,6 +522,23 @@ export default function VerificationPage() {
               className="w-64 pl-8"
             />
           </div>
+          {doctorReview && (
+            <>
+              <Button variant="outline" disabled={loading || marksBusy || rows.length === 0} onClick={() => setSelectOpen(true)}>
+                Select all
+              </Button>
+              <Button variant="outline" disabled={loading || marksBusy || checkedCount === 0} onClick={() => setClearOpen(true)}>
+                Clear all
+              </Button>
+              <Button
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                disabled={checkedCount === 0 || loading || bulkBusy}
+                onClick={() => setBulkOpen(true)}
+              >
+                <ShieldCheck /> {bulkLabel}
+              </Button>
+            </>
+          )}
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={loading ? 'animate-spin' : undefined} /> Refresh
           </Button>
@@ -396,17 +601,35 @@ export default function VerificationPage() {
                     <td className="px-4 py-3 text-slate-700">{r.reported_by_name || '-'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDateTime(r.reporting_datetime)}</td>
                     <td className="px-4 py-3 text-right">
-                      {canVerify(user, r) ? (
-                        <Button size="sm" onClick={() => setReviewing(r)}>
-                          <ShieldCheck /> Review &amp; Verify
-                        </Button>
-                      ) : (
-                        <span title="You can only verify reports assigned to you">
-                          <Button size="sm" variant="outline" disabled>
-                            <Lock /> Not assigned to you
+                      <div className="flex items-center justify-end gap-2">
+                        {doctorReview && canVerify(user, r) && (
+                          <Checkbox
+                            checked={!!r.reviewed}
+                            disabled={rowMarkingKey === `${r.report_type}-${r.report_id}` || marksBusy}
+                            onCheckedChange={(v) => handleListReviewed(r, v === true)}
+                            aria-label={`Mark ${r.lab_no} as reviewed`}
+                          />
+                        )}
+                        {doctorReview && r.reviewed && (
+                          <Badge tone="emerald" className="gap-1">
+                            <Check className="h-3 w-3" /> Reviewed
+                          </Badge>
+                        )}
+                        {doctorReview && !r.reviewed && r.review_stale && (
+                          <Badge tone="amber">Changed - review again</Badge>
+                        )}
+                        {canVerify(user, r) ? (
+                          <Button size="sm" onClick={() => setReviewing(r)}>
+                            <ShieldCheck /> Review &amp; Verify
                           </Button>
-                        </span>
-                      )}
+                        ) : (
+                          <span title="You can only verify reports assigned to you">
+                            <Button size="sm" variant="outline" disabled>
+                              <Lock /> Not assigned to you
+                            </Button>
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -417,10 +640,86 @@ export default function VerificationPage() {
       </Card>
 
       <ReviewDialog
-        report={reviewing && canVerify(user, reviewing) ? reviewing : null}
+        report={
+          reviewing && canVerify(user, reviewing)
+            ? (rows.find((r) => r.report_type === reviewing.report_type && r.report_id === reviewing.report_id) ??
+              reviewing)
+            : null
+        }
+        queue={rows}
+        doctorReview={!!doctorReview}
         onClose={() => setReviewing(null)}
         onVerified={handleVerified}
+        onNavigate={setReviewing}
+        onReviewedChange={handleReviewedChange}
       />
+
+      <Dialog open={bulkOpen} onOpenChange={(open) => !bulkBusy && setBulkOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Bulk Verify</DialogTitle>
+            <DialogDescription>
+              Verify and lock {checkedCount} report{checkedCount === 1 ? '' : 's'}? Only reports you marked as reviewed
+              will be verified. Unticked reports stay pending. Reports that changed after your tick will be skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)} disabled={bulkBusy}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
+              onClick={handleBulkVerify}
+              disabled={bulkBusy || checkedCount === 0}
+            >
+              {bulkBusy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+              {bulkBusy ? 'Verifying...' : `Verify and lock ${checkedCount}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={selectOpen} onOpenChange={(open) => !marksBusy && setSelectOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select all</DialogTitle>
+            <DialogDescription>
+              Confirm that you have reviewed all reports assigned to you in this queue. Up to 50 pending reports will be
+              marked as reviewed. Nothing will be verified or locked yet.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectOpen(false)} disabled={marksBusy}>
+              Cancel
+            </Button>
+            <Button onClick={handleSelectAll} disabled={marksBusy}>
+              {marksBusy ? <Loader2 className="animate-spin" /> : null}
+              {marksBusy ? 'Marking...' : 'I have reviewed them all'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={clearOpen} onOpenChange={(open) => !marksBusy && setClearOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Clear all</DialogTitle>
+            <DialogDescription>
+              Remove all of your review ticks? Other doctors&apos; marks are not affected. Reports stay pending until you
+              verify them.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClearOpen(false)} disabled={marksBusy}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleClearAll} disabled={marksBusy}>
+              {marksBusy ? <Loader2 className="animate-spin" /> : null}
+              {marksBusy ? 'Clearing...' : 'Clear my ticks'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

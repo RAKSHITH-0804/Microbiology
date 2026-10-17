@@ -70,3 +70,14 @@ export const ledgerLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, message: 'Too many patient ledger searches. Please wait a minute and try again.' },
 });
+
+/** Bulk verification batches; keyed per signed-in doctor. */
+export const bulkVerifyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  keyGenerator: (req) => `user:${req.user?.sub ?? 'anonymous'}`,
+  skip: skipInTests,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many bulk verification requests. Please wait a minute and try again.' },
+});
